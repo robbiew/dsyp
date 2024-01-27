@@ -5,15 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
-
-	"golang.org/x/term"
 )
 
 const (
-	ArtFileDir = "art/"
-	ansi       = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
+	ArtFileDir    = "art/"
+	ansi          = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
+	stateMainMenu = iota
+	statePlaying
+	stateQuit
 )
 
 type User struct {
@@ -45,6 +47,7 @@ type GameState struct {
 	pressureMessage bool
 	cursX           int
 	cursY           int
+	AppState        int
 }
 
 type Ticker interface {
@@ -171,57 +174,6 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 	return game
 }
 
-func (g *Game) run() {
-	errorChan := make(chan error)
-	dataChan := make(chan []byte)
-
-	// Display the main menu
-	g.displayMainMenu()
-
-	// Start reading input asynchronously
-	go readWrapper(dataChan, errorChan)
-	r := bytes.NewBuffer(nil)
-
-	for {
-		select {
-		case data := <-dataChan:
-			for _, char := range data {
-				switch char {
-				case '\r', '\n':
-					// Handle enter key
-					input := r.String()
-					r.Reset()
-					g.processMainMenuInput(input)
-				default:
-					// Accumulate characters in buffer
-					r.WriteByte(char)
-				}
-			}
-		case err := <-errorChan:
-			// Handle any read errors
-			fmt.Println("Error reading input:", err)
-			return
-		}
-	}
-}
-
-func (g *Game) processMainMenuInput(input string) {
-	switch strings.ToLower(input) {
-	case "play":
-		g.startGame()
-	case "awards":
-		g.showAwards()
-	case "quit":
-		fmt.Println("Quitting...")
-		time.Sleep(1 * time.Second)
-		CursorShow()
-		os.Exit(0)
-	default:
-		fmt.Println("Invalid choice, please try again.")
-		g.displayMainMenu()
-	}
-}
-
 func (g *Game) handleInput(input string) {
 	// Trim any whitespace from the input
 	input = strings.TrimSpace(input)
@@ -261,20 +213,17 @@ func (g *Game) timer(stopChan chan bool) {
 	ticker := NewTicker(time.Second)
 	defer ticker.Stop()
 
-	// Save the user's cursor position
-	// userCursorX, userCursorY := g.GameState.cursX, g.GameState.cursY
-
 	for remaining := time.Second * 40; remaining >= 0; remaining -= ticker.Duration() {
 		select {
 		case <-stopChan:
 			return // Stop signal received, exit the timer
 		default:
 			// Timer update logic
-			// MoveCursor(0, 0)
-			// fmt.Printf(Green+" TIMER: %v"+Reset, remaining)
+			MoveCursor(0, 0)
+			fmt.Printf(Green+" TIMER: %v"+Reset, remaining)
 
-			// // Restore the user's cursor position
-			// MoveCursor(userCursorX, userCursorY)
+			// Restore the user's cursor position
+			MoveCursor(g.GameState.cursX, g.GameState.cursY)
 
 			if remaining == 0 {
 				// Timer expired, call gameOver
@@ -295,79 +244,79 @@ func (g *Game) startGame() {
 	MoveCursor(4, 24) // Start from position 4 on the next line
 	g.GameState.cursX, g.GameState.cursY = 4, 24
 
-	// Initialize channels for timer and input handling
 	stopChan := make(chan bool)
 	errorChan := make(chan error)
 	dataChan := make(chan []byte)
 
-	// Start the timer
 	go g.timer(stopChan)
+	go readWrapper(dataChan, errorChan)
 
-	// Set terminal to raw mode for input handling
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	// Save the current terminal settings
+	saveCmd := exec.Command("/bin/stty", "-F", "/dev/tty", "-g")
+	saveOut, err := saveCmd.Output()
 	if err != nil {
-		fmt.Println("Error setting terminal to raw mode:", err)
+		fmt.Println("Failed to get current stty settings:", err)
+		return
+	}
+	originalSettings := strings.TrimSpace(string(saveOut))
+
+	// Set terminal to raw mode
+	setRawCmd := exec.Command("/bin/stty", "-F", "/dev/tty", "-icanon", "min", "1")
+	err = setRawCmd.Run()
+	if err != nil {
+		fmt.Println("Failed to set raw mode:", err)
 		return
 	}
 
-	// Ensure terminal is restored to non-raw mode when function exits
+	// Schedule the terminal restore code to run when the function exits
 	defer func() {
-		if err := term.Restore(int(os.Stdin.Fd()), oldState); err != nil {
-			fmt.Println("Error restoring terminal state:", err)
+		restoreCmd := exec.Command("/bin/stty", "-F", "/dev/tty", originalSettings)
+		err = restoreCmd.Run()
+		if err != nil {
+			fmt.Println("Failed to restore stty settings:", err)
 		}
 	}()
 
-	// Start reading input asynchronously
-	go readWrapper(dataChan, errorChan)
-
-	// Buffer for handling rune-based input
 	var r []rune
 
-	// Main input handling loop
 	for {
 		select {
 		case data := <-dataChan:
-			for _, char := range data {
-				switch char {
-				case '\b', 127: // Backspace handling
-					if len(r) > 0 {
-						r = r[:len(r)-1]
-						if g.GameState.cursX > 4 {
-							g.GameState.cursX--
-							fmt.Print("\b \b") // Move cursor back and clear character
-							os.Stdout.Sync()   // Flush output buffer
-						}
-					}
-				case '\r', '\n': // Enter key handling
-					input := string(r)
-					r = nil                                 // Reset buffer
-					fmt.Println("\nInput received:", input) // Debugging: print input
+			char := rune(data[0])
 
-					if strings.ToLower(input) == "quit" {
-						stopChan <- true
-						close(stopChan)
-						return // Exit function, triggering defer to restore terminal state
-					}
+			if char == '\r' || char == '\n' {
+				input := string(r)
+				r = nil                                 // Reset buffer
+				fmt.Println("\nInput received:", input) // Debugging: print input
 
-					g.handleInput(input) // Handle other inputs
+				// Special handling for "quit" command
+				if strings.ToLower(input) == "quit" {
+					// Stop the timer
+					stopChan <- true
+					close(stopChan)
 
-				default: // Regular character handling
-					r = append(r, rune(char))
-					g.GameState.cursX++
-					MoveCursor(g.GameState.cursX, g.GameState.cursY)
-					fmt.Printf("%c", char)
-					os.Stdout.Sync()
+					// Handle the "quit" input
+					g.handleInput(input)
+
+					return // Exit startGame function
 				}
+			} else if char == '\b' || char == 127 {
+				if len(r) > 0 {
+					r = r[:len(r)-1] // Remove the last character from the buffer
+				}
+			} else {
+				// Regular character handling
+				// fmt.Printf("%c", char) // Echo the character
+				g.GameState.cursX++
+				MoveCursor(g.GameState.cursX, g.GameState.cursY)
+				r = append(r, char)
 			}
 
-		case err := <-errorChan: // Handle any read errors
+		case err := <-errorChan:
 			fmt.Println("Error reading input:", err)
-			return // Exit function, triggering defer to restore terminal state
+			return
 		}
-
-		// Additional game logic here (if any)
 	}
-	// Exiting the loop will trigger the defer statement to restore terminal state
 }
 
 func (g *Game) showAwards() {
@@ -389,6 +338,66 @@ func (g *Game) gameOver() {
 	g.displayMainMenu()
 }
 
+func (g *Game) processMainMenuInput(input string) {
+	switch strings.ToLower(input) {
+	case "play":
+		g.GameState.AppState = statePlaying
+	case "quit":
+		g.GameState.AppState = stateQuit
+	default:
+		fmt.Println("Invalid choice, please try again.")
+		g.displayMainMenu()
+	}
+}
+
+func (g *Game) run() {
+	errorChan := make(chan error)
+	dataChan := make(chan []byte)
+
+	g.GameState.AppState = stateMainMenu // Initialize the app state
+
+	for g.GameState.AppState != stateQuit {
+		switch g.GameState.AppState {
+		case stateMainMenu:
+			// Display the main menu
+			g.displayMainMenu()
+
+			// Start reading input asynchronously
+			go readWrapper(dataChan, errorChan)
+			r := bytes.NewBuffer(nil)
+
+			for g.GameState.AppState == stateMainMenu {
+				select {
+				case data := <-dataChan:
+					for _, char := range data {
+						switch char {
+						case '\r', '\n':
+							// Handle enter key
+							input := r.String()
+							r.Reset()
+							g.processMainMenuInput(input) // This will update g.GameState.AppState
+						default:
+							// Accumulate characters in buffer
+							r.WriteByte(char)
+						}
+					}
+				case err := <-errorChan:
+					// Handle any read errors
+					fmt.Println("Error reading input:", err)
+					return
+				}
+			}
+
+		case statePlaying:
+			// Start the game
+			g.startGame()
+			g.GameState.AppState = stateMainMenu // After the game ends, return to the main menu
+
+			// Add more states as needed
+		}
+	}
+}
+
 func main() {
 	// Define the flags
 	localDisplayPtr := flag.Bool("local", false, "use local UTF-8 display instead of CP437")
@@ -402,5 +411,6 @@ func main() {
 
 	// Initialize and run the game
 	game := initializeGame(localDisplay, *pathPtr)
+
 	game.run()
 }
