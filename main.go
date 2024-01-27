@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/eiannone/keyboard"
 )
 
 const (
@@ -182,29 +183,6 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 	return game
 }
 
-func (g *Game) handleInput(input string) {
-	// Trim any whitespace from the input
-	input = strings.TrimSpace(input)
-
-	// Handle different cases based on the input
-	switch input {
-	case "shit":
-		// Example case if the user types "shit"
-		g.processShitCommand()
-	case "help":
-		// Example case if the user asks for help
-		g.showHelp()
-	case "quit":
-		g.run()
-	default:
-		// Handle unknown commands
-		fmt.Println("I don't know how to ", input)
-	}
-
-	// You can add more cases here depending on the commands
-	// you want to handle in your game.
-}
-
 func (g *Game) processShitCommand() {
 	// Implement what happens when the user types "shit"
 	fmt.Println("Processing 'shit' command...")
@@ -215,6 +193,10 @@ func (g *Game) showHelp() {
 	// Implement help instructions
 	fmt.Println("Help instructions go here...")
 	// Example: Display commands and descriptions
+}
+
+func (g *Game) showAwards() {
+	fmt.Println("Displaying Awards...")
 }
 
 func (g *Game) timer(stopChan chan bool) {
@@ -303,18 +285,8 @@ func (g *Game) startGame() {
 
 				// Special handling for "quit" command
 				if strings.ToLower(input) == "quit" {
-					// Stop the timer
-					stopChan <- true
-					close(stopChan)
-
-					// Signal all goroutines to stop
-					close(doneChan)
-					g.GameState.AppState = stateMainMenu // Ensure AppState is set to return to the main menu
-					// Exit startGame function
-
-					// Handle the "quit" input
-					g.handleInput(input)
-
+					// Cleanup and exit the game
+					g.cleanupGame(stopChan, doneChan, originalSettings)
 					return // Exit startGame function
 				}
 			} else if char == '\b' || char == 127 {
@@ -329,13 +301,33 @@ func (g *Game) startGame() {
 
 		case err := <-errorChan:
 			fmt.Println("Error reading input:", err)
+			// Cleanup and exit the game
+			g.cleanupGame(stopChan, doneChan, originalSettings)
 			return
 		}
+
 	}
+
 }
 
-func (g *Game) showAwards() {
-	fmt.Println("Displaying Awards...")
+func (g *Game) cleanupGame(stopChan chan bool, doneChan chan bool, originalSettings string) {
+
+	// Stop the timer
+	stopChan <- true
+	close(stopChan)
+
+	// Signal all goroutines to stop
+	close(doneChan)
+
+	// Restore terminal settings
+	restoreCmd := exec.Command("/bin/stty", "-F", "/dev/tty", originalSettings)
+	if err := restoreCmd.Run(); err != nil {
+		fmt.Println("Failed to restore stty settings:", err)
+	}
+
+	// Ensure AppState is set to return to the main menu
+	g.GameState.AppState = stateMainMenu
+
 }
 
 func (g *Game) displayMainMenu() {
@@ -353,22 +345,14 @@ func (g *Game) gameOver() {
 	g.displayMainMenu()
 }
 
-func (g *Game) processMainMenuInput(input string) {
-	switch strings.ToLower(input) {
-	case "play":
-		g.GameState.AppState = statePlaying
-	case "quit":
-		g.GameState.AppState = stateQuit
-	default:
-		fmt.Println("Invalid choice, please try again.")
-		g.displayMainMenu()
-	}
-}
-
 func (g *Game) run() {
-	doneChan := make(chan bool) // Create a done channel to control readWrapper
-	errorChan := make(chan error)
-	dataChan := make(chan []byte)
+
+	if err := keyboard.Open(); err != nil {
+		panic(err)
+	}
+	defer func() {
+		_ = keyboard.Close()
+	}()
 
 	g.GameState.AppState = stateMainMenu // Initialize the app state
 
@@ -379,55 +363,53 @@ func (g *Game) run() {
 			CursorHide()
 			g.displayMainMenu()
 
-			// Start reading input asynchronously
-			go readWrapper(dataChan, errorChan, doneChan)
-			r := bytes.NewBuffer(nil)
+			MoveCursor(1, 24)
 
-		loop:
-			for g.GameState.AppState == stateMainMenu { // Label the loop here
-				select {
-				case data := <-dataChan:
-					for _, char := range data {
-						switch char {
-						case '\r', '\n':
-							// Handle enter key
-							input := r.String()
-							r.Reset()
-							g.processMainMenuInput(input) // This will update g.GameState.AppState
+			// Handle the keypress
+			char, keyErr := g.readKey()
+			if keyErr != nil {
+				fmt.Println("Error reading input:", keyErr)
+				return
+			}
 
-							if g.GameState.AppState != stateMainMenu {
-								// When leaving the main menu state, signal readWrapper to stop
-								if g.GameState.AppState != stateMainMenu {
-									close(doneChan)            // Close the doneChan to signal readWrapper to stop
-									doneChan = make(chan bool) // Create a new done channel for the next state
-								}
-								break loop // Break out of the select and for loop
-							}
+			fmt.Printf("Main Menu: Key Pressed: %c\n", char) // Debugging log
 
-						default:
-							// Accumulate characters in buffer
-							r.WriteByte(char)
-						}
-					}
-				case err := <-errorChan:
-					// Handle any read errors
-					fmt.Println("Error reading input:", err)
-					return
-				}
+			switch char {
+			case 'p', 'P':
+				g.GameState.AppState = statePlaying
+			case 'q', 'Q':
+				g.GameState.AppState = stateQuit
+			default:
+				fmt.Println("Invalid choice, please try again.")
+				g.displayMainMenu()
 			}
 
 		case statePlaying:
-			// Start the game
+			fmt.Println("Starting Game...") // Debugging log
 			g.startGame()
-			g.GameState.AppState = stateMainMenu // After the game ends, return to the main menu
-
-			// Add more states as needed
+			fmt.Println("Game Ended. Returning to Main Menu...") // Debugging log
+			time.Sleep(1 * time.Second)                          // Small delay to let things settle
+			g.GameState.AppState = stateMainMenu                 // After the game ends, return to the main menu
 		}
 	}
-	// Perform any necessary clean-up here before the application exits
+
 	fmt.Println("Exiting the game. Goodbye!")
 	CursorShow()
-	// For example, you might restore terminal settings or close open resources here.
+}
+
+// readKey reads a single key press and handles flushing of buffer
+func (g *Game) readKey() (rune, error) {
+	for {
+		char, key, err := keyboard.GetSingleKey()
+		if err != nil {
+			return char, err
+		}
+
+		// Check if key is a valid key (not a modifier or function key)
+		if key == keyboard.KeySpace || key == keyboard.KeyEnter || (char != 0 && key == 0) {
+			return char, nil
+		}
+	}
 }
 
 func main() {
