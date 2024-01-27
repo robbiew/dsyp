@@ -48,6 +48,7 @@ type GameState struct {
 	cursX           int
 	cursY           int
 	AppState        int
+	DoneChan        chan bool
 }
 
 type Ticker interface {
@@ -70,17 +71,22 @@ func NewTicker(d time.Duration) Ticker {
 	return &ticker{time.NewTicker(d), d}
 }
 
-func readWrapper(dataChan chan []byte, errorChan chan error) {
+func readWrapper(dataChan chan []byte, errorChan chan error, doneChan chan bool) {
 	for {
-		buf := make([]byte, 1) // Read one byte at a time
-		n, err := os.Stdin.Read(buf)
-		if err != nil {
-			errorChan <- err
-			return
-		}
-		if n > 0 {
-			os.Stdout.Write(buf[:n]) // Echo the input back to the user
-			dataChan <- buf[:n]
+		select {
+		case <-doneChan:
+			return // Exit the goroutine if a done signal is received
+		default:
+			buf := make([]byte, 1) // Read one byte at a time
+			n, err := os.Stdin.Read(buf)
+			if err != nil {
+				errorChan <- err
+				return
+			}
+			if n > 0 {
+				os.Stdout.Write(buf[:n]) // Echo the input back to the user
+				dataChan <- buf[:n]
+			}
 		}
 	}
 }
@@ -159,6 +165,8 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 		pressureMessage: false,
 		cursX:           4,
 		cursY:           23,
+		AppState:        stateMainMenu,
+		DoneChan:        make(chan bool),
 	}
 
 	// Initialize a map for tracking awards
@@ -217,6 +225,8 @@ func (g *Game) timer(stopChan chan bool) {
 		select {
 		case <-stopChan:
 			return // Stop signal received, exit the timer
+		case <-g.GameState.DoneChan:
+			return // Game is done, exit the timer
 		default:
 			// Timer update logic
 			MoveCursor(0, 0)
@@ -228,6 +238,7 @@ func (g *Game) timer(stopChan chan bool) {
 			if remaining == 0 {
 				// Timer expired, call gameOver
 				g.gameOver()
+				close(g.GameState.DoneChan) // Signal all goroutines to stop, corrected typo herep
 				return
 			}
 		}
@@ -247,9 +258,10 @@ func (g *Game) startGame() {
 	stopChan := make(chan bool)
 	errorChan := make(chan error)
 	dataChan := make(chan []byte)
+	doneChan := g.GameState.DoneChan // Use the existing doneChan from the GameState
 
 	go g.timer(stopChan)
-	go readWrapper(dataChan, errorChan)
+	go readWrapper(dataChan, errorChan, doneChan)
 
 	// Save the current terminal settings
 	saveCmd := exec.Command("/bin/stty", "-F", "/dev/tty", "-g")
@@ -295,6 +307,11 @@ func (g *Game) startGame() {
 					stopChan <- true
 					close(stopChan)
 
+					// Signal all goroutines to stop
+					close(doneChan)
+					g.GameState.AppState = stateMainMenu // Ensure AppState is set to return to the main menu
+					// Exit startGame function
+
 					// Handle the "quit" input
 					g.handleInput(input)
 
@@ -305,8 +322,6 @@ func (g *Game) startGame() {
 					r = r[:len(r)-1] // Remove the last character from the buffer
 				}
 			} else {
-				// Regular character handling
-				// fmt.Printf("%c", char) // Echo the character
 				g.GameState.cursX++
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
 				r = append(r, char)
@@ -351,6 +366,7 @@ func (g *Game) processMainMenuInput(input string) {
 }
 
 func (g *Game) run() {
+	doneChan := make(chan bool) // Create a done channel to control readWrapper
 	errorChan := make(chan error)
 	dataChan := make(chan []byte)
 
@@ -360,13 +376,15 @@ func (g *Game) run() {
 		switch g.GameState.AppState {
 		case stateMainMenu:
 			// Display the main menu
+			CursorHide()
 			g.displayMainMenu()
 
 			// Start reading input asynchronously
-			go readWrapper(dataChan, errorChan)
+			go readWrapper(dataChan, errorChan, doneChan)
 			r := bytes.NewBuffer(nil)
 
-			for g.GameState.AppState == stateMainMenu {
+		loop:
+			for g.GameState.AppState == stateMainMenu { // Label the loop here
 				select {
 				case data := <-dataChan:
 					for _, char := range data {
@@ -376,6 +394,16 @@ func (g *Game) run() {
 							input := r.String()
 							r.Reset()
 							g.processMainMenuInput(input) // This will update g.GameState.AppState
+
+							if g.GameState.AppState != stateMainMenu {
+								// When leaving the main menu state, signal readWrapper to stop
+								if g.GameState.AppState != stateMainMenu {
+									close(doneChan)            // Close the doneChan to signal readWrapper to stop
+									doneChan = make(chan bool) // Create a new done channel for the next state
+								}
+								break loop // Break out of the select and for loop
+							}
+
 						default:
 							// Accumulate characters in buffer
 							r.WriteByte(char)
@@ -396,6 +424,10 @@ func (g *Game) run() {
 			// Add more states as needed
 		}
 	}
+	// Perform any necessary clean-up here before the application exits
+	fmt.Println("Exiting the game. Goodbye!")
+	CursorShow()
+	// For example, you might restore terminal settings or close open resources here.
 }
 
 func main() {
