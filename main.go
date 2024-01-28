@@ -189,6 +189,23 @@ func (g *Game) processShitCommand() {
 	// Example: Update GameState, trigger events, etc.
 }
 
+func (g *Game) showHelp() {
+	// Implement help instructions
+	fmt.Println("Help instructions go here...")
+	// Example: Display commands and descriptions
+}
+
+func (g *Game) showAwards() {
+	fmt.Println("Displaying Awards...")
+}
+
+func (g *Game) gameOver() {
+	// Display a game over message or perform other necessary actions
+	fmt.Println("Game Over! Time's up.")
+	time.Sleep(2 * time.Second)
+	// g.displayMainMenu()
+}
+
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) { // Clear the screen and display initial game art and messages
 	g.GameState.AppState = statePlaying
 	g.updateGameEnvironment()
