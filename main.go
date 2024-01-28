@@ -4,11 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/eiannone/keyboard"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -206,6 +205,7 @@ func (g *Game) timer(stopChan chan bool) {
 	for remaining := time.Second * 40; remaining >= 0; remaining -= ticker.Duration() {
 		select {
 		case <-stopChan:
+			ticker.Stop()
 			return // Stop signal received, exit the timer
 		case <-g.GameState.DoneChan:
 			return // Game is done, exit the timer
@@ -228,8 +228,60 @@ func (g *Game) timer(stopChan chan bool) {
 	}
 }
 
+func (g *Game) setupGameEnvironment() {
+	// This function should set up the game environment (clear screen, display art, etc.)
+}
+
+func (g *Game) updateGameEnvironment() {
+	// This function should update the game environment based on the current state
+	// For example, display the main menu or the game screen
+}
+
+func (g *Game) cleanupGameEnvironment() {
+	// This function should clean up the game environment when the game ends or quits
+}
+
+func (g *Game) cleanupGame() {
+	// Properly stop the game timer and any other necessary cleanup
+	// ...
+
+	// If you have a game timer running in a separate goroutine, you might want to signal it to stop
+	// For example, if you use a channel to signal the timer to stop:
+	// close(stopChan) // stopChan is the channel you use to signal the timer goroutine to stop
+
+	// Close channels used during the game if they are no longer needed
+	if g.GameState.DoneChan != nil {
+		close(g.GameState.DoneChan)
+		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
+	}
+}
+
+func enableRawMode() (*unix.Termios, error) {
+	originalState, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
+	if err != nil {
+		return nil, err
+	}
+
+	newState := *originalState
+	newState.Lflag &^= unix.ECHO   // Disable echo
+	newState.Lflag &^= unix.ICANON // Disable canonical mode
+	newState.Lflag &^= unix.ISIG   // Disable signal generation (Ctrl-C, Ctrl-Z)
+	newState.Lflag &^= unix.IXON   // Disable XON/XOFF flow control
+
+	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &newState); err != nil {
+		return nil, err
+	}
+
+	return originalState, nil
+}
+
+func disableRawMode(originalState *unix.Termios) error {
+	return unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState)
+}
+
 func (g *Game) startGame() {
 	// Clear the screen and display initial game art and messages
+	g.GameState.AppState = statePlaying
 	ClearScreen()
 	displayAnsiFile(ArtFileDir + "2.ans")
 	MoveCursor(4, 23)
@@ -245,55 +297,30 @@ func (g *Game) startGame() {
 	go g.timer(stopChan)
 	go readWrapper(dataChan, errorChan, doneChan)
 
-	// Save the current terminal settings
-	saveCmd := exec.Command("/bin/stty", "-F", "/dev/tty", "-g")
-	saveOut, err := saveCmd.Output()
-	if err != nil {
-		fmt.Println("Failed to get current stty settings:", err)
-		return
-	}
-	originalSettings := strings.TrimSpace(string(saveOut))
-
-	// Set terminal to raw mode
-	setRawCmd := exec.Command("/bin/stty", "-F", "/dev/tty", "-icanon", "min", "1")
-	err = setRawCmd.Run()
-	if err != nil {
-		fmt.Println("Failed to set raw mode:", err)
-		return
-	}
-
-	// Schedule the terminal restore code to run when the function exits
-	defer func() {
-		restoreCmd := exec.Command("/bin/stty", "-F", "/dev/tty", originalSettings)
-		err = restoreCmd.Run()
-		if err != nil {
-			fmt.Println("Failed to restore stty settings:", err)
-		}
-	}()
-
 	var r []rune
 
 	for {
 		select {
 		case data := <-dataChan:
 			char := rune(data[0])
-
 			if char == '\r' || char == '\n' {
 				input := string(r)
-				r = nil                                 // Reset buffer
-				fmt.Println("\nInput received:", input) // Debugging: print input
-
-				// Special handling for "quit" command
-				if strings.ToLower(input) == "quit" {
-					// Cleanup and exit the game
-					g.cleanupGame(stopChan, doneChan, originalSettings)
-					return // Exit startGame function
+				r = nil
+				fmt.Println("\nInput received:", input)
+				g.handleGameplayInput(input, stopChan) // Handle input with stopChan
+				// Check if the state has changed to MainMenu, if so, break the loop
+				if g.GameState.AppState == stateMainMenu {
+					return
 				}
 			} else if char == '\b' || char == 127 {
 				if len(r) > 0 {
 					r = r[:len(r)-1] // Remove the last character from the buffer
+					// Handle backspace for the terminal: Move cursor back, print space, move cursor back
+					fmt.Print("\b \b")
 				}
+
 			} else {
+				fmt.Print(string(char)) // Print character as it's typed
 				g.GameState.cursX++
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
 				r = append(r, char)
@@ -302,32 +329,58 @@ func (g *Game) startGame() {
 		case err := <-errorChan:
 			fmt.Println("Error reading input:", err)
 			// Cleanup and exit the game
-			g.cleanupGame(stopChan, doneChan, originalSettings)
+			return
+
+		}
+		// Check if the state has changed to MainMenu, if so, break the loop
+		if g.GameState.AppState == stateMainMenu {
 			return
 		}
-
 	}
-
 }
 
-func (g *Game) cleanupGame(stopChan chan bool, doneChan chan bool, originalSettings string) {
+func (g *Game) handleMainMenuInput(input string) {
+	// Trim any whitespace from the input and make it lowercase
+	input = strings.TrimSpace(strings.ToLower(input))
 
-	// Stop the timer
-	stopChan <- true
-	close(stopChan)
-
-	// Signal all goroutines to stop
-	close(doneChan)
-
-	// Restore terminal settings
-	restoreCmd := exec.Command("/bin/stty", "-F", "/dev/tty", originalSettings)
-	if err := restoreCmd.Run(); err != nil {
-		fmt.Println("Failed to restore stty settings:", err)
+	switch input {
+	case "play":
+		g.GameState.AppState = statePlaying
+		g.startGame()
+	case "quit":
+		g.GameState.AppState = stateQuit
+		CursorShow()
+		fmt.Println("Exiting the game. Goodbye!")
+		time.Sleep(1 * time.Second)
+		os.Exit(0)
+	default:
+		fmt.Println("Invalid choice, please try again.")
+		g.displayMainMenu()
 	}
+}
 
-	// Ensure AppState is set to return to the main menu
-	g.GameState.AppState = stateMainMenu
+func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
+	// Trim any whitespace from the input and make it lowercase
+	input = strings.TrimSpace(strings.ToLower(input))
 
+	switch input {
+	case "shit":
+		g.processShitCommand()
+	case "help":
+		g.showHelp()
+	case "quit":
+		// Send a signal to stop the timer
+		stopChan <- true
+		close(stopChan) // Close the channel to signal that no more data will be sent on it
+
+		// Handle 'quit' during gameplay
+		g.cleanupGame() // Perform any necessary cleanup
+		g.GameState.AppState = stateMainMenu
+		g.displayMainMenu() // Display the main menu after quitting the game
+		return
+	default:
+		fmt.Println("I don't understand:", input)
+	}
 }
 
 func (g *Game) displayMainMenu() {
@@ -346,70 +399,61 @@ func (g *Game) gameOver() {
 }
 
 func (g *Game) run() {
+	// Initialize channels for input handling
+	errorChan := make(chan error)
+	dataChan := make(chan []byte)
+	doneChan := make(chan bool)
 
-	if err := keyboard.Open(); err != nil {
-		panic(err)
+	// Start the input reading goroutine
+	go readWrapper(dataChan, errorChan, doneChan)
+
+	// Set up the game environment
+	g.setupGameEnvironment()
+	defer g.cleanupGameEnvironment()
+
+	// Initialize the game state
+	g.GameState.AppState = stateMainMenu
+
+	g.displayMainMenu()
+
+	// Enable raw mode
+	originalState, err := enableRawMode()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to enable raw mode:", err)
+		os.Exit(1)
 	}
-	defer func() {
-		_ = keyboard.Close()
-	}()
+	defer disableRawMode(originalState) // Restore terminal state at the end
 
-	g.GameState.AppState = stateMainMenu // Initialize the app state
-
+	var r []rune
 	for g.GameState.AppState != stateQuit {
-		switch g.GameState.AppState {
-		case stateMainMenu:
-			// Display the main menu
-			CursorHide()
-			g.displayMainMenu()
+		select {
+		case data := <-dataChan:
+			char := rune(data[0])
 
-			MoveCursor(1, 24)
-
-			// Handle the keypress
-			char, keyErr := g.readKey()
-			if keyErr != nil {
-				fmt.Println("Error reading input:", keyErr)
-				return
+			if char == '\r' || char == '\n' {
+				input := string(r)
+				r = nil // Reset buffer
+				if g.GameState.AppState == stateMainMenu {
+					g.handleMainMenuInput(input)
+				}
+			} else if char == '\b' || char == 127 {
+				if len(r) > 0 {
+					r = r[:len(r)-1] // Remove the last character from the buffer
+				}
+			} else {
+				r = append(r, char)
 			}
 
-			fmt.Printf("Main Menu: Key Pressed: %c\n", char) // Debugging log
-
-			switch char {
-			case 'p', 'P':
-				g.GameState.AppState = statePlaying
-			case 'q', 'Q':
-				g.GameState.AppState = stateQuit
-			default:
-				fmt.Println("Invalid choice, please try again.")
-				g.displayMainMenu()
-			}
-
-		case statePlaying:
-			fmt.Println("Starting Game...") // Debugging log
-			g.startGame()
-			fmt.Println("Game Ended. Returning to Main Menu...") // Debugging log
-			time.Sleep(1 * time.Second)                          // Small delay to let things settle
-			g.GameState.AppState = stateMainMenu                 // After the game ends, return to the main menu
+		case err := <-errorChan:
+			fmt.Println("Error reading input:", err)
+			return
 		}
+
+		// Update the game environment based on the current state
+		g.updateGameEnvironment()
 	}
 
-	fmt.Println("Exiting the game. Goodbye!")
-	CursorShow()
-}
-
-// readKey reads a single key press and handles flushing of buffer
-func (g *Game) readKey() (rune, error) {
-	for {
-		char, key, err := keyboard.GetSingleKey()
-		if err != nil {
-			return char, err
-		}
-
-		// Check if key is a valid key (not a modifier or function key)
-		if key == keyboard.KeySpace || key == keyboard.KeyEnter || (char != 0 && key == 0) {
-			return char, nil
-		}
-	}
+	close(doneChan) // Signal all goroutines to stop
 }
 
 func main() {
