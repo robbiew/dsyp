@@ -71,23 +71,33 @@ func NewTicker(d time.Duration) Ticker {
 	return &ticker{time.NewTicker(d), d}
 }
 
-func readWrapper(dataChan chan []byte, errorChan chan error, doneChan chan bool) {
-	for {
+func (g *Game) timer(stopChan chan bool) {
+	ticker := NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for remaining := time.Second * 40; remaining >= 0; remaining -= ticker.Duration() {
 		select {
-		case <-doneChan:
-			return // Exit the goroutine if a done signal is received
+		case <-stopChan:
+			ticker.Stop()
+			return // Stop signal received, exit the timer
+		case <-g.GameState.DoneChan:
+			return // Game is done, exit the timer
 		default:
-			buf := make([]byte, 1) // Read one byte at a time
-			n, err := os.Stdin.Read(buf)
-			if err != nil {
-				errorChan <- err
+			// Timer update logic
+			MoveCursor(0, 0)
+			fmt.Printf(Green+" TIMER: %v"+Reset, remaining)
+
+			// Restore the user's cursor position
+			MoveCursor(g.GameState.cursX, g.GameState.cursY)
+
+			if remaining == 0 {
+				// Timer expired, call gameOver
+				g.gameOver()
+				close(g.GameState.DoneChan) // Signal all goroutines to stop, corrected typo herep
 				return
 			}
-			if n > 0 {
-				os.Stdout.Write(buf[:n]) // Echo the input back to the user
-				dataChan <- buf[:n]
-			}
 		}
+		ticker.Tick()
 	}
 }
 
@@ -123,6 +133,291 @@ func (g *Game) Countdown(ticker Ticker, duration time.Duration, stopChan <-chan 
 		fmt.Print(Reset)
 	}()
 	return remainingCh
+}
+
+func readWrapper(inputChan chan byte, errorChan chan error, doneChan chan bool, game *Game) {
+	for {
+		select {
+		case <-doneChan:
+			return // Exit the goroutine if a done signal is received
+		default:
+			buf := make([]byte, 1) // Read one byte at a time
+			n, err := os.Stdin.Read(buf)
+			if err != nil {
+				errorChan <- err
+				return
+			}
+			if n > 0 {
+				inputChan <- buf[0] // Send the byte to the channel
+			}
+		}
+	}
+}
+
+func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) {
+	// Trim any whitespace from the input and make it lowercase
+	input = strings.TrimSpace(strings.ToLower(input))
+
+	switch input {
+	case "play":
+		g.GameState.AppState = statePlaying
+		g.startGame(inputChan, errorChan, doneChan)
+	case "quit":
+		g.GameState.AppState = stateQuit
+		CursorShow()
+		fmt.Println("Exiting the game. Goodbye!")
+		time.Sleep(1 * time.Second)
+		os.Exit(0)
+	default:
+		fmt.Println("Invalid choice, please try again.")
+		g.displayMainMenu()
+
+	}
+}
+
+func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
+	input = strings.TrimSpace(strings.ToLower(input))
+	switch input {
+	case "shit":
+		g.processShitCommand()
+	case "help":
+		g.showHelp()
+	case "quit":
+		// Send a signal to stop the timer
+		stopChan <- true
+		safeClose(stopChan) // Safely close the channel
+
+		// Handle 'quit' during gameplay
+		g.cleanupGame() // Perform any necessary cleanup
+		g.GameState.AppState = stateMainMenu
+		g.displayMainMenu() // Display the main menu after quitting the game
+		return
+	default:
+		fmt.Println("I don't understand:", input)
+	}
+}
+
+func (g *Game) processShitCommand() {
+	// Implement what happens when the user types "shit"
+	fmt.Println("Processing 'shit' command...")
+	// Example: Update GameState, trigger events, etc.
+}
+
+func (g *Game) showHelp() {
+	// Implement help instructions
+	fmt.Println("Help instructions go here...")
+	// Example: Display commands and descriptions
+}
+
+func (g *Game) showAwards() {
+	fmt.Println("Displaying Awards...")
+}
+
+func (g *Game) displayMainMenu() {
+	ClearScreen()
+	displayAnsiFile(ArtFileDir + "main.ans")
+	MoveCursor(0, 0)
+	fmt.Printf(WhiteHi+" Welcome, %s"+Reset, g.User.Alias)
+}
+
+func (g *Game) gameOver() {
+	ClearScreen()
+	// Display a game over message or perform other necessary actions
+	fmt.Println("Game Over! Time's up.")
+	time.Sleep(2 * time.Second)
+	g.displayMainMenu()
+
+}
+
+func (g *Game) setupGameEnvironment() {
+	// This function should set up the game environment (clear screen, display art, etc.)
+}
+
+func (g *Game) updateGameEnvironment() {
+	// This function should update the game environment based on the current state
+	// For example, display the main menu or the game screen
+}
+
+func (g *Game) cleanupGameEnvironment() {
+	// This function should clean up the game environment when the game ends or quits
+}
+
+func (g *Game) cleanupGame() {
+	// Close channels used during the game if they are no longer needed
+	if g.GameState.DoneChan != nil {
+		close(g.GameState.DoneChan)
+		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
+	}
+}
+
+func enableRawMode() (*unix.Termios, error) {
+	originalState, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
+	if err != nil {
+		return nil, err
+	}
+
+	newState := *originalState
+	newState.Lflag &^= unix.ECHO   // Disable echo
+	newState.Lflag &^= unix.ICANON // Disable canonical mode
+	newState.Lflag &^= unix.ISIG   // Disable signal generation (Ctrl-C, Ctrl-Z)
+	newState.Lflag &^= unix.IXON   // Disable XON/XOFF flow control
+
+	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &newState); err != nil {
+		return nil, err
+	}
+
+	return originalState, nil
+}
+
+func disableRawMode(originalState *unix.Termios) error {
+	return unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState)
+}
+
+func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool) {
+	// Set up the game environment
+	g.setupGameEnvironment()
+	defer g.cleanupGameEnvironment()
+
+	// Initialize the game state
+	g.GameState.AppState = stateMainMenu
+
+	g.displayMainMenu()
+
+	g.GameState.cursX, g.GameState.cursY = 4, 23
+	MoveCursor(g.GameState.cursX, g.GameState.cursY)
+
+	// Enable raw mode
+	originalState, err := enableRawMode()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Failed to enable raw mode:", err)
+		os.Exit(1)
+	}
+	defer disableRawMode(originalState) // Restore terminal state at the end
+
+	var r []rune
+	for g.GameState.AppState != stateQuit {
+		select {
+		case char := <-inputChan:
+			if char == '\r' || char == '\n' {
+				input := string(r)
+				r = nil       // Reset buffer
+				fmt.Println() // Move to the next line
+				if g.GameState.AppState == stateMainMenu {
+					g.handleMainMenuInput(input, inputChan, errorChan, doneChan)
+				} else if g.GameState.AppState == statePlaying {
+					g.handleGameplayInput(input, nil) // Pass nil if stopChan is not needed or not available
+				}
+			} else if char == '\b' || char == 127 {
+				if len(r) > 0 {
+					r = r[:len(r)-1]   // Remove the last character from the buffer
+					fmt.Print("\b \b") // Handle backspace: move cursor back, print space, move cursor back again
+				}
+			} else {
+				// Regular character input
+				fmt.Print(string(char)) // Print character as it's typed
+				r = append(r, rune(char))
+				g.GameState.cursX++
+				MoveCursor(g.GameState.cursX, g.GameState.cursY)
+			}
+
+		case err := <-errorChan:
+			fmt.Println("Error reading input:", err)
+			return
+		}
+
+		// Update the game environment based on the current state
+		g.updateGameEnvironment()
+	}
+	close(doneChan) // Signal all goroutines to stop
+}
+
+func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) { // Clear the screen and display initial game art and messages
+	g.GameState.AppState = statePlaying
+	ClearScreen()
+	displayAnsiFile(ArtFileDir + "2.ans")
+	MoveCursor(4, 23)
+	fmt.Print(Yellow + "You need to take a shit. Bad.")
+	MoveCursor(4, 24) // Start from position 4 on the next line
+	g.GameState.cursX, g.GameState.cursY = 4, 24
+
+	stopChan := make(chan bool)
+
+	go g.timer(stopChan)
+
+	var r []rune
+	for {
+		select {
+		case char := <-inputChan:
+			runeChar := rune(char) // Convert byte to rune
+			if runeChar == '\r' || runeChar == '\n' {
+				input := string(r)
+				r = nil // Reset buffer
+				fmt.Println("\nInput received:", input)
+				g.handleGameplayInput(input, stopChan) // Handle input with stopChan
+				// Check if the state has changed to MainMenu, if so, break the loop
+				if g.GameState.AppState == stateMainMenu {
+					safeClose(stopChan) // Safely close the stop channel
+					return
+				}
+			} else if runeChar == '\b' || runeChar == 127 {
+				if len(r) > 0 {
+					r = r[:len(r)-1] // Remove the last character from the buffer
+					// Handle backspace for the terminal: Move cursor back, print space, move cursor back again
+					fmt.Print("\b \b")
+				}
+
+			} else {
+				fmt.Print(string(runeChar)) // Print character as it's typed
+				r = append(r, runeChar)
+				g.GameState.cursX++
+				MoveCursor(g.GameState.cursX, g.GameState.cursY)
+
+			}
+
+		case err := <-errorChan:
+			fmt.Println("Error reading input:", err)
+			safeClose(stopChan) // Safely close the stop channel
+			// Cleanup and exit the game
+			return
+
+		}
+		// Check if the state has changed to MainMenu, if so, break the loop
+		if g.GameState.AppState == stateMainMenu {
+			return
+		}
+	}
+}
+
+// Safe channel close utility function
+func safeClose(ch chan bool) {
+	select {
+	case <-ch:
+		// Channel already closed
+	default:
+		close(ch)
+	}
+}
+
+func (g *Game) processInputDuringGameplay(char byte, r *[]rune, stopChan chan bool) {
+	// Process each character received during gameplay
+	if char == '\r' || char == '\n' {
+		// Handle enter key
+		input := string(*r)
+		*r = nil // Reset buffer
+		fmt.Println("\nInput received:", input)
+		g.handleGameplayInput(input, stopChan)
+	} else if char == '\b' || char == 127 {
+		// Handle backspace
+		if len(*r) > 0 {
+			*r = (*r)[:len(*r)-1] // Remove the last character from the buffer
+			// Handle backspace for the terminal: Move cursor back, print space, move cursor back
+			fmt.Print("\b \b")
+		}
+	} else {
+		// Handle normal characters
+		fmt.Print(string(char)) // Print character as it's typed
+		*r = append(*r, rune(char))
+	}
 }
 
 func initializeGame(localDisplay bool, dropPath string) *Game {
@@ -182,280 +477,6 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 	return game
 }
 
-func (g *Game) processShitCommand() {
-	// Implement what happens when the user types "shit"
-	fmt.Println("Processing 'shit' command...")
-	// Example: Update GameState, trigger events, etc.
-}
-
-func (g *Game) showHelp() {
-	// Implement help instructions
-	fmt.Println("Help instructions go here...")
-	// Example: Display commands and descriptions
-}
-
-func (g *Game) showAwards() {
-	fmt.Println("Displaying Awards...")
-}
-
-func (g *Game) timer(stopChan chan bool) {
-	ticker := NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for remaining := time.Second * 40; remaining >= 0; remaining -= ticker.Duration() {
-		select {
-		case <-stopChan:
-			ticker.Stop()
-			return // Stop signal received, exit the timer
-		case <-g.GameState.DoneChan:
-			return // Game is done, exit the timer
-		default:
-			// Timer update logic
-			MoveCursor(0, 0)
-			fmt.Printf(Green+" TIMER: %v"+Reset, remaining)
-
-			// Restore the user's cursor position
-			MoveCursor(g.GameState.cursX, g.GameState.cursY)
-
-			if remaining == 0 {
-				// Timer expired, call gameOver
-				g.gameOver()
-				close(g.GameState.DoneChan) // Signal all goroutines to stop, corrected typo herep
-				return
-			}
-		}
-		ticker.Tick()
-	}
-}
-
-func (g *Game) setupGameEnvironment() {
-	// This function should set up the game environment (clear screen, display art, etc.)
-}
-
-func (g *Game) updateGameEnvironment() {
-	// This function should update the game environment based on the current state
-	// For example, display the main menu or the game screen
-}
-
-func (g *Game) cleanupGameEnvironment() {
-	// This function should clean up the game environment when the game ends or quits
-}
-
-func (g *Game) cleanupGame() {
-	// Properly stop the game timer and any other necessary cleanup
-	// ...
-
-	// If you have a game timer running in a separate goroutine, you might want to signal it to stop
-	// For example, if you use a channel to signal the timer to stop:
-	// close(stopChan) // stopChan is the channel you use to signal the timer goroutine to stop
-
-	// Close channels used during the game if they are no longer needed
-	if g.GameState.DoneChan != nil {
-		close(g.GameState.DoneChan)
-		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
-	}
-}
-
-func enableRawMode() (*unix.Termios, error) {
-	originalState, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
-	if err != nil {
-		return nil, err
-	}
-
-	newState := *originalState
-	newState.Lflag &^= unix.ECHO   // Disable echo
-	newState.Lflag &^= unix.ICANON // Disable canonical mode
-	newState.Lflag &^= unix.ISIG   // Disable signal generation (Ctrl-C, Ctrl-Z)
-	newState.Lflag &^= unix.IXON   // Disable XON/XOFF flow control
-
-	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &newState); err != nil {
-		return nil, err
-	}
-
-	return originalState, nil
-}
-
-func disableRawMode(originalState *unix.Termios) error {
-	return unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState)
-}
-
-func (g *Game) startGame() {
-	// Clear the screen and display initial game art and messages
-	g.GameState.AppState = statePlaying
-	ClearScreen()
-	displayAnsiFile(ArtFileDir + "2.ans")
-	MoveCursor(4, 23)
-	fmt.Print(Yellow + "You need to take a shit. Bad.")
-	MoveCursor(4, 24) // Start from position 4 on the next line
-	g.GameState.cursX, g.GameState.cursY = 4, 24
-
-	stopChan := make(chan bool)
-	errorChan := make(chan error)
-	dataChan := make(chan []byte)
-	doneChan := g.GameState.DoneChan // Use the existing doneChan from the GameState
-
-	go g.timer(stopChan)
-	go readWrapper(dataChan, errorChan, doneChan)
-
-	var r []rune
-
-	for {
-		select {
-		case data := <-dataChan:
-			char := rune(data[0])
-			if char == '\r' || char == '\n' {
-				input := string(r)
-				r = nil
-				fmt.Println("\nInput received:", input)
-				g.handleGameplayInput(input, stopChan) // Handle input with stopChan
-				// Check if the state has changed to MainMenu, if so, break the loop
-				if g.GameState.AppState == stateMainMenu {
-					return
-				}
-			} else if char == '\b' || char == 127 {
-				if len(r) > 0 {
-					r = r[:len(r)-1] // Remove the last character from the buffer
-					// Handle backspace for the terminal: Move cursor back, print space, move cursor back
-					fmt.Print("\b \b")
-				}
-
-			} else {
-				fmt.Print(string(char)) // Print character as it's typed
-				g.GameState.cursX++
-				MoveCursor(g.GameState.cursX, g.GameState.cursY)
-				r = append(r, char)
-			}
-
-		case err := <-errorChan:
-			fmt.Println("Error reading input:", err)
-			// Cleanup and exit the game
-			return
-
-		}
-		// Check if the state has changed to MainMenu, if so, break the loop
-		if g.GameState.AppState == stateMainMenu {
-			return
-		}
-	}
-}
-
-func (g *Game) handleMainMenuInput(input string) {
-	// Trim any whitespace from the input and make it lowercase
-	input = strings.TrimSpace(strings.ToLower(input))
-
-	switch input {
-	case "play":
-		g.GameState.AppState = statePlaying
-		g.startGame()
-	case "quit":
-		g.GameState.AppState = stateQuit
-		CursorShow()
-		fmt.Println("Exiting the game. Goodbye!")
-		time.Sleep(1 * time.Second)
-		os.Exit(0)
-	default:
-		fmt.Println("Invalid choice, please try again.")
-		g.displayMainMenu()
-	}
-}
-
-func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
-	// Trim any whitespace from the input and make it lowercase
-	input = strings.TrimSpace(strings.ToLower(input))
-
-	switch input {
-	case "shit":
-		g.processShitCommand()
-	case "help":
-		g.showHelp()
-	case "quit":
-		// Send a signal to stop the timer
-		stopChan <- true
-		close(stopChan) // Close the channel to signal that no more data will be sent on it
-
-		// Handle 'quit' during gameplay
-		g.cleanupGame() // Perform any necessary cleanup
-		g.GameState.AppState = stateMainMenu
-		g.displayMainMenu() // Display the main menu after quitting the game
-		return
-	default:
-		fmt.Println("I don't understand:", input)
-	}
-}
-
-func (g *Game) displayMainMenu() {
-	ClearScreen()
-	displayAnsiFile(ArtFileDir + "main.ans")
-	MoveCursor(0, 0)
-	fmt.Printf(WhiteHi+" Welcome, %s"+Reset, g.User.Alias)
-}
-
-func (g *Game) gameOver() {
-	ClearScreen()
-	// Display a game over message or perform other necessary actions
-	fmt.Println("Game Over! Time's up.")
-	time.Sleep(2 * time.Second)
-	g.displayMainMenu()
-}
-
-func (g *Game) run() {
-	// Initialize channels for input handling
-	errorChan := make(chan error)
-	dataChan := make(chan []byte)
-	doneChan := make(chan bool)
-
-	// Start the input reading goroutine
-	go readWrapper(dataChan, errorChan, doneChan)
-
-	// Set up the game environment
-	g.setupGameEnvironment()
-	defer g.cleanupGameEnvironment()
-
-	// Initialize the game state
-	g.GameState.AppState = stateMainMenu
-
-	g.displayMainMenu()
-
-	// Enable raw mode
-	originalState, err := enableRawMode()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to enable raw mode:", err)
-		os.Exit(1)
-	}
-	defer disableRawMode(originalState) // Restore terminal state at the end
-
-	var r []rune
-	for g.GameState.AppState != stateQuit {
-		select {
-		case data := <-dataChan:
-			char := rune(data[0])
-
-			if char == '\r' || char == '\n' {
-				input := string(r)
-				r = nil // Reset buffer
-				if g.GameState.AppState == stateMainMenu {
-					g.handleMainMenuInput(input)
-				}
-			} else if char == '\b' || char == 127 {
-				if len(r) > 0 {
-					r = r[:len(r)-1] // Remove the last character from the buffer
-				}
-			} else {
-				r = append(r, char)
-			}
-
-		case err := <-errorChan:
-			fmt.Println("Error reading input:", err)
-			return
-		}
-
-		// Update the game environment based on the current state
-		g.updateGameEnvironment()
-	}
-
-	close(doneChan) // Signal all goroutines to stop
-}
-
 func main() {
 	// Define the flags
 	localDisplayPtr := flag.Bool("local", false, "use local UTF-8 display instead of CP437")
@@ -465,10 +486,19 @@ func main() {
 	flag.Parse()
 
 	// Use the flag values
-	localDisplay = *localDisplayPtr
+	localDisplay := *localDisplayPtr
 
-	// Initialize and run the game
+	// Initialize the game
 	game := initializeGame(localDisplay, *pathPtr)
 
-	game.run()
+	// Input channels
+	inputChan := make(chan byte)
+	errorChan := make(chan error)
+	doneChan := make(chan bool)
+
+	// Start the input reading goroutine
+	go readWrapper(inputChan, errorChan, doneChan, game)
+
+	// Start the game
+	game.run(inputChan, errorChan, doneChan)
 }
