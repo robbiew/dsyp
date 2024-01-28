@@ -218,6 +218,7 @@ func (g *Game) displayMainMenu() {
 	displayAnsiFile(ArtFileDir + "main.ans")
 	MoveCursor(0, 0)
 	fmt.Printf(WhiteHi+" Welcome, %s"+Reset, g.User.Alias)
+	MoveCursor(g.GameState.cursX, g.GameState.cursY)
 }
 
 func (g *Game) gameOver() {
