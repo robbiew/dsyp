@@ -39,6 +39,7 @@ func (g *Game) timer(stopChan chan bool) {
 		default:
 			// Timer update logic
 			MoveCursor(0, 0)
+			fmt.Print(Reset + EraseLine)
 			fmt.Printf(Reset+Green+" TIMER: %v"+Reset, remaining)
 			fmt.Print(BgBlue + YellowHi)
 

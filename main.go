@@ -99,7 +99,7 @@ func (g *Game) setupGameEnvironment() {
 	ClearScreen()
 	displayAnsiFile(ArtFileDir + "main.ans")
 	MoveCursor(1, 1)
-	fmt.Printf(WhiteHi+" Welcome, %s"+Reset, g.User.Alias)
+	fmt.Printf(WhiteHi+" Welcome,%s"+Reset, g.User.Alias)
 	// MoveCursor(6, 24)
 }
 
@@ -111,7 +111,7 @@ func (g *Game) updateGameEnvironment() {
 			ClearScreen()
 			displayAnsiFile(ArtFileDir + "main.ans")
 			MoveCursor(1, 1)
-			fmt.Printf(WhiteHi+" Welcome, %s"+Reset, g.User.Alias)
+			fmt.Printf(WhiteHi+" Welcome,%s"+Reset, g.User.Alias)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
 			MoveCursor(7, 23)
 
@@ -141,23 +141,35 @@ func (g *Game) cleanupGame() {
 		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
 	}
 }
-func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) {
-	// Trim any whitespace from the input and make it lowercase
+func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) { // Trim any whitespace from the input and make it lowercase
 	input = strings.TrimSpace(strings.ToLower(input))
 
 	switch input {
 	case "play":
 		g.GameState.AppState = statePlaying
-		g.startGame(inputChan, errorChan, doneChan)
+		g.startGame(inputChan, errorChan, doneChan, resetTimerChan)
 	case "quit":
 		g.GameState.AppState = stateQuit
-		CursorShow()
-		fmt.Println("Exiting the game. Goodbye!")
+		CursorHide()
+		MoveCursor(7, 23)
+		fmt.Println(BgBlue + RedHi + "Exiting the game. Goodbye!" + Reset)
 		time.Sleep(1 * time.Second)
+		fmt.Print(BgBlue + RedHi + "                         " + Reset)
+		MoveCursor(7, 23)
+		CursorShow()
 		os.Exit(0)
 	default:
-		fmt.Println("Invalid choice, please try again.")
+		CursorHide()
+		MoveCursor(7, 23)
+		fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
+		time.Sleep(1 * time.Second)
+		MoveCursor(7, 23)
+		fmt.Print(BgBlue + RedHi + "                " + Reset)
+		MoveCursor(7, 23)
+		g.GameState.cursX, g.GameState.cursY = 7, 23
 		g.updateGameEnvironment() // Use this to display the correct environment based on the current state
+		CursorShow()
+		resetTimerChan <- true // Reset the idle timer
 	}
 }
 
@@ -179,7 +191,14 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		g.updateGameEnvironment() // Properly load the main menu environment
 		return
 	default:
-		fmt.Println("I don't know how to ", input)
+		MoveCursor(2, 23)
+		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
+		MoveCursor(2, 23)
+		fmt.Fprintf(os.Stdout, BgBlue+CyanHi+"I don't know how to "+RedHi+"%s"+Reset, input)
+		MoveCursor(5, 24)
+		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
+		g.GameState.cursX, g.GameState.cursY = 5, 24
+
 	}
 }
 
@@ -206,7 +225,7 @@ func (g *Game) gameOver() {
 	// g.displayMainMenu()
 }
 
-func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) { // Clear the screen and display initial game art and messages
+func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) {
 	g.GameState.AppState = statePlaying
 	g.updateGameEnvironment()
 	stopChan := make(chan bool)
@@ -226,7 +245,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 				r = nil // Reset buffer
 				fmt.Print(Reset)
 
-				fmt.Println("\nInput received:", input)
+				// fmt.Println("\nInput received:", input)
 				g.handleGameplayInput(input, stopChan) // Handle input with stopChan
 
 				// Check if the state has changed to MainMenu, if so, break the loop
@@ -239,6 +258,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 					r = r[:len(r)-1] // Remove the last character from the buffer
 					// Handle backspace for the terminal: Move cursor back, print space, move cursor back again
 					fmt.Print("\b \b")
+					g.GameState.cursX--
 				}
 
 			} else {
@@ -246,7 +266,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 				r = append(r, runeChar)
 				g.GameState.cursX++
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
-
+				resetTimerChan <- true // Reset the idle timer
 			}
 
 		case err := <-errorChan:
@@ -274,8 +294,9 @@ func safeClose(ch chan bool) {
 	}
 }
 
-func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool) {
+func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) {
 	// Set up the game environment
+
 	g.GameState.AppState = stateMainMenu
 	g.setupGameEnvironment()
 	defer g.cleanupGameEnvironment()
@@ -297,12 +318,13 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 		fmt.Print(BgBlue + YellowHi)
 		select {
 		case char := <-inputChan:
+			resetTimerChan <- true // Reset the idle timer
 			if char == '\r' || char == '\n' {
 				input := string(r)
 				r = nil          // Reset buffer
 				fmt.Print(Reset) // Move to the next line
 				if g.GameState.AppState == stateMainMenu {
-					g.handleMainMenuInput(input, inputChan, errorChan, doneChan)
+					g.handleMainMenuInput(input, inputChan, errorChan, doneChan, resetTimerChan)
 				} else if g.GameState.AppState == statePlaying {
 					g.handleGameplayInput(input, nil) // Pass nil if stopChan is not needed or not available
 				}
@@ -310,6 +332,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 				if len(r) > 0 {
 					r = r[:len(r)-1]   // Remove the last character from the buffer
 					fmt.Print("\b \b") // Handle backspace: move cursor back, print space, move cursor back again
+					g.GameState.cursX--
 				}
 			} else {
 				// Regular character input
@@ -403,10 +426,33 @@ func main() {
 	inputChan := make(chan byte)
 	errorChan := make(chan error)
 	doneChan := make(chan bool)
+	resetTimerChan := make(chan bool)
 
 	// Start the input reading goroutine
 	go readWrapper(inputChan, errorChan, doneChan, game)
 
+	// Start the idle timer goroutine
+	go func() {
+		// Set the idle timeout duration to 3 minutes
+		idleTimeout := 3 * time.Minute
+		idleTimer := time.NewTimer(idleTimeout)
+
+		for {
+			select {
+			case <-idleTimer.C:
+				// Idle timeout reached, print the message and exit
+				fmt.Println("Idle timeout -- come back another time!")
+				os.Exit(0)
+			case <-resetTimerChan:
+				// Keyboard input received, reset the timer
+				if !idleTimer.Stop() {
+					<-idleTimer.C
+				}
+				idleTimer.Reset(idleTimeout)
+			}
+		}
+	}()
+
 	// Start the game
-	game.run(inputChan, errorChan, doneChan)
+	game.run(inputChan, errorChan, doneChan, resetTimerChan)
 }
