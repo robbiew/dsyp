@@ -98,8 +98,8 @@ func (g *Game) setupGameEnvironment() {
 	// This function should set up the game environment (clear screen, display art, etc.)
 	ClearScreen()
 	displayAnsiFile(ArtFileDir + "main.ans")
-	MoveCursor(1, 1)
-	fmt.Printf(WhiteHi+" Welcome,%s"+Reset, g.User.Alias)
+	MoveCursor(4, 2)
+	fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
 	// MoveCursor(6, 24)
 }
 
@@ -110,8 +110,8 @@ func (g *Game) updateGameEnvironment() {
 		case stateMainMenu:
 			ClearScreen()
 			displayAnsiFile(ArtFileDir + "main.ans")
-			MoveCursor(1, 1)
-			fmt.Printf(WhiteHi+" Welcome,%s"+Reset, g.User.Alias)
+			MoveCursor(4, 2)
+			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+"S:"+Reset, g.User.Alias)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
 			MoveCursor(7, 23)
 
@@ -222,10 +222,34 @@ func (g *Game) gameOver() {
 	// Display a game over message or perform other necessary actions
 	fmt.Println("Game Over! Time's up.")
 	time.Sleep(2 * time.Second)
-	// g.displayMainMenu()
 }
 
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) {
+
+	ClearScreen()
+	CursorHide()
+	displayAnsiFile(ArtFileDir + "intro.ans")
+
+	PrintStringLoc("5", 40, 19)
+	time.Sleep(time.Second * 1)
+
+	PrintStringLoc("4", 40, 19)
+	time.Sleep(time.Second * 1)
+
+	PrintStringLoc("3", 40, 19)
+	time.Sleep(time.Second * 1)
+
+	PrintStringLoc("2", 40, 19)
+	time.Sleep(time.Second * 1)
+
+	PrintStringLoc("1", 40, 19)
+	time.Sleep(time.Second * 1)
+
+	PrintStringLoc("GO!", 39, 19)
+	time.Sleep(time.Second * 1)
+
+	CursorShow()
+
 	g.GameState.AppState = statePlaying
 	g.updateGameEnvironment()
 	stopChan := make(chan bool)
@@ -433,15 +457,16 @@ func main() {
 
 	// Start the idle timer goroutine
 	go func() {
-		// Set the idle timeout duration to 3 minutes
-		idleTimeout := 3 * time.Minute
+		// Set the idle timeout duration to 1 minutes
+		idleTimeout := 1 * time.Minute
 		idleTimer := time.NewTimer(idleTimeout)
 
 		for {
 			select {
 			case <-idleTimer.C:
 				// Idle timeout reached, print the message and exit
-				fmt.Println("Idle timeout -- come back another time!")
+				MoveCursor(7, 23)
+				fmt.Print(BgBlue + RedHi + "Idle timeout -- come back another time!" + Reset)
 				os.Exit(0)
 			case <-resetTimerChan:
 				// Keyboard input received, reset the timer
