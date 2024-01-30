@@ -37,6 +37,13 @@ func (g *Game) timer(stopChan chan bool) {
 		case <-g.GameState.DoneChan:
 			return // Game is done, exit the timer
 		default:
+			if remaining < time.Second*20 {
+				// Specific logic when the timer is under 20 seconds
+				MoveCursor(2, 23)
+				fmt.Print(EraseLine)
+				fmt.Println(BgBlue + RedHi + "Hurry! You need to find a way to reduce the pressure in your gut." + Reset)
+			}
+
 			// Timer update logic
 			MoveCursor(0, 0)
 			fmt.Print(Reset + EraseLine)
@@ -55,38 +62,4 @@ func (g *Game) timer(stopChan chan bool) {
 		}
 		ticker.Tick()
 	}
-}
-
-func (g *Game) Countdown(ticker Ticker, duration time.Duration, stopChan <-chan bool) chan time.Duration {
-	remainingCh := make(chan time.Duration, 1)
-	go func() {
-		for remaining := duration; remaining >= 0; remaining -= ticker.Duration() {
-			select {
-			case <-stopChan:
-				// Handle stop signal
-				ticker.Stop()
-				return
-			default:
-				// Countdown logic
-				if remaining < time.Second*20 {
-					// Specific logic when the timer is under 20 seconds
-					if g.GameState.pressureMessage {
-						MoveCursor(4, 22)
-						fmt.Print(EraseLine)
-						fmt.Println("Hurry! You need to find a way to reduce the pressure in your gut.")
-						g.GameState.pressureMessage = false
-					}
-				}
-				remainingCh <- remaining
-				ticker.Tick()
-			}
-		}
-		ticker.Stop()
-		close(remainingCh)
-		MoveCursor(0, 0)
-		fmt.Print(Red)
-		fmt.Print(" TIME'S UP!")
-		fmt.Print(Reset)
-	}()
-	return remainingCh
 }

@@ -111,7 +111,7 @@ func (g *Game) updateGameEnvironment() {
 			ClearScreen()
 			displayAnsiFile(ArtFileDir + "main.ans")
 			MoveCursor(4, 2)
-			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+"S:"+Reset, g.User.Alias)
+			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
 			MoveCursor(7, 23)
 
@@ -141,13 +141,13 @@ func (g *Game) cleanupGame() {
 		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
 	}
 }
-func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) { // Trim any whitespace from the input and make it lowercase
+func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) { // Trim any whitespace from the input and make it lowercase
 	input = strings.TrimSpace(strings.ToLower(input))
 
 	switch input {
 	case "play":
 		g.GameState.AppState = statePlaying
-		g.startGame(inputChan, errorChan, doneChan, resetTimerChan)
+		g.startGame(inputChan, errorChan, doneChan)
 	case "quit":
 		g.GameState.AppState = stateQuit
 		CursorHide()
@@ -169,7 +169,6 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		g.GameState.cursX, g.GameState.cursY = 7, 23
 		g.updateGameEnvironment() // Use this to display the correct environment based on the current state
 		CursorShow()
-		resetTimerChan <- true // Reset the idle timer
 	}
 }
 
@@ -224,7 +223,7 @@ func (g *Game) gameOver() {
 	time.Sleep(2 * time.Second)
 }
 
-func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) {
+func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {
 
 	ClearScreen()
 	CursorHide()
@@ -290,7 +289,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 				r = append(r, runeChar)
 				g.GameState.cursX++
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
-				resetTimerChan <- true // Reset the idle timer
+
 			}
 
 		case err := <-errorChan:
@@ -318,7 +317,7 @@ func safeClose(ch chan bool) {
 	}
 }
 
-func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool, resetTimerChan chan bool) {
+func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool) {
 	// Set up the game environment
 
 	g.GameState.AppState = stateMainMenu
@@ -342,13 +341,12 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 		fmt.Print(BgBlue + YellowHi)
 		select {
 		case char := <-inputChan:
-			resetTimerChan <- true // Reset the idle timer
 			if char == '\r' || char == '\n' {
 				input := string(r)
 				r = nil          // Reset buffer
 				fmt.Print(Reset) // Move to the next line
 				if g.GameState.AppState == stateMainMenu {
-					g.handleMainMenuInput(input, inputChan, errorChan, doneChan, resetTimerChan)
+					g.handleMainMenuInput(input, inputChan, errorChan, doneChan)
 				} else if g.GameState.AppState == statePlaying {
 					g.handleGameplayInput(input, nil) // Pass nil if stopChan is not needed or not available
 				}
@@ -450,34 +448,10 @@ func main() {
 	inputChan := make(chan byte)
 	errorChan := make(chan error)
 	doneChan := make(chan bool)
-	resetTimerChan := make(chan bool)
 
 	// Start the input reading goroutine
 	go readWrapper(inputChan, errorChan, doneChan, game)
 
-	// Start the idle timer goroutine
-	go func() {
-		// Set the idle timeout duration to 1 minutes
-		idleTimeout := 1 * time.Minute
-		idleTimer := time.NewTimer(idleTimeout)
-
-		for {
-			select {
-			case <-idleTimer.C:
-				// Idle timeout reached, print the message and exit
-				MoveCursor(7, 23)
-				fmt.Print(BgBlue + RedHi + "Idle timeout -- come back another time!" + Reset)
-				os.Exit(0)
-			case <-resetTimerChan:
-				// Keyboard input received, reset the timer
-				if !idleTimer.Stop() {
-					<-idleTimer.C
-				}
-				idleTimer.Reset(idleTimeout)
-			}
-		}
-	}()
-
 	// Start the game
-	game.run(inputChan, errorChan, doneChan, resetTimerChan)
+	game.run(inputChan, errorChan, doneChan)
 }
