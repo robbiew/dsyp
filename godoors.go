@@ -195,6 +195,13 @@ func askYesNo(prompt string) bool {
 }
 
 func Pause(h int, w int) {
+	if err := keyboard.Open(); err != nil {
+		panic(err)
+	}
+	defer func() {
+		_ = keyboard.Close()
+	}()
+
 	MoveCursor(0, h)
 
 	CenterText("Press any key to continue...", w)

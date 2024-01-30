@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -21,6 +22,9 @@ const (
 	stateAwards
 	stateHelp
 	stateIntro
+	LogLevelInput = iota
+	LogLevelWarning
+	LogLevelError
 )
 
 type User struct {
@@ -58,6 +62,18 @@ type GameState struct {
 	LastAppState    int
 }
 
+func inputLog(level int, userAlias string, message string) {
+	switch level {
+	case LogLevelInput:
+		formattedMessage := fmt.Sprintf("[INPUT] [%s]: %s", userAlias, message)
+		log.Print(formattedMessage)
+	case LogLevelWarning:
+		log.Print("[WARNING] " + message)
+	case LogLevelError:
+		log.Print("[ERROR] " + message)
+	}
+}
+
 func enableRawMode() (*unix.Termios, error) {
 	originalState, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
 	if err != nil {
@@ -78,7 +94,10 @@ func enableRawMode() (*unix.Termios, error) {
 }
 
 func disableRawMode(originalState *unix.Termios) error {
-	return unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState)
+	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState); err != nil {
+		return err
+	}
+	return nil
 }
 
 func readWrapper(inputChan chan byte, errorChan chan error, doneChan chan bool, game *Game) {
@@ -137,9 +156,11 @@ func (g *Game) updateGameEnvironment() {
 			CursorHide()
 			fmt.Println("Displaying Awards...")
 
-			DelayedAction(2*time.Second, func() {
-				fmt.Println("Done")
-			})
+			Pause(24, 80)
+
+			// DelayedAction(2*time.Second, func() {
+			// 	fmt.Println("Done")
+			// })
 
 			CursorShow()
 			fmt.Print(Reset)
@@ -257,6 +278,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 
 func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
+	inputLog(LogLevelInput, g.User.Alias, input)
 	switch input {
 	case "shit":
 		// Lock the mutex before accessing/modifying shared resources
@@ -476,6 +498,15 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 }
 
 func main() {
+	// Create a log file and set log output
+	file, err := os.Create("game.log")
+	if err != nil {
+		log.Fatal("Cannot create log file:", err)
+	}
+	defer file.Close()
+
+	log.SetOutput(file)
+
 	// Define the flags
 	localDisplayPtr := flag.Bool("local", false, "use local UTF-8 display instead of CP437")
 	pathPtr := flag.String("path", "", "path to door32.sys file (optional if --local is set)")
