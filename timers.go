@@ -55,8 +55,9 @@ func (g *Game) timer(stopChan chan bool) {
 
 			if remaining == 0 {
 				// Timer expired, call gameOver
-				g.gameOver()
-				close(g.GameState.DoneChan) // Signal all goroutines to stop, corrected typo herep
+				close(g.GameState.DoneChan) // Signal all goroutines to stop
+				g.GameState.AppState = stateGameOver
+				g.updateGameEnvironment()
 				return
 			}
 		}

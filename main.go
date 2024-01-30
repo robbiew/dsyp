@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -16,6 +17,10 @@ const (
 	stateMainMenu = iota
 	statePlaying
 	stateQuit
+	stateGameOver
+	stateAwards
+	stateHelp
+	stateIntro
 )
 
 type User struct {
@@ -33,6 +38,7 @@ type Game struct {
 	User      User
 	GameState GameState
 	Awards    map[string]bool
+	mutex     sync.Mutex
 }
 
 type GameState struct {
@@ -106,23 +112,79 @@ func (g *Game) setupGameEnvironment() {
 func (g *Game) updateGameEnvironment() {
 	// Only update the environment if the game state has changed
 	if g.GameState.AppState != g.GameState.LastAppState {
+		ClearScreen()
+
 		switch g.GameState.AppState {
+
 		case stateMainMenu:
-			ClearScreen()
 			displayAnsiFile(ArtFileDir + "main.ans")
 			MoveCursor(4, 2)
 			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
 			MoveCursor(7, 23)
+			fmt.Print(Reset)
 
 		case statePlaying:
-			ClearScreen()
 			displayAnsiFile(ArtFileDir + "start.ans")
 			MoveCursor(2, 23)
 			fmt.Print(BgBlue + CyanHi + "You need to take a shit. Bad." + Reset)
 			MoveCursor(5, 24) // Start from position 4 on the next line
 			fmt.Print(YellowHi)
 			g.GameState.cursX, g.GameState.cursY = 5, 24
+			fmt.Print(Reset)
+
+		case stateAwards:
+			CursorHide()
+			fmt.Println("Displaying Awards...")
+
+			DelayedAction(2*time.Second, func() {
+				fmt.Println("Done")
+			})
+
+			CursorShow()
+			fmt.Print(Reset)
+			g.GameState.AppState = stateMainMenu
+			g.setupGameEnvironment()
+			g.GameState.cursX, g.GameState.cursY = 7, 23
+			MoveCursor(7, 23)
+
+		case stateGameOver:
+			CursorHide()
+			fmt.Println("Game Over! Time's up.")
+
+			DelayedAction(2*time.Second, func() {
+				fmt.Print("Done")
+			})
+
+			CursorShow()
+			fmt.Print(Reset)
+			g.GameState.AppState = stateMainMenu
+			g.setupGameEnvironment()
+			g.GameState.cursX, g.GameState.cursY = 7, 23
+			MoveCursor(7, 23)
+
+		case stateIntro:
+			ClearScreen()
+			CursorHide()
+			displayAnsiFile(ArtFileDir + "intro.ans")
+
+			PrintStringLoc("3", 40, 19)
+			DelayedAction(1*time.Second, func() {
+				PrintStringLoc("2", 40, 19)
+			})
+
+			DelayedAction(1*time.Second, func() {
+				PrintStringLoc("1", 40, 19)
+			})
+
+			DelayedAction(1*time.Second, func() {
+				PrintStringLoc("GO!", 39, 19)
+			})
+
+			DelayedAction(1*time.Second, func() {
+				fmt.Print(Reset)
+				CursorShow()
+			})
 
 			// ... other cases ...
 		}
@@ -141,7 +203,20 @@ func (g *Game) cleanupGame() {
 		g.GameState.DoneChan = make(chan bool) // Reinitialize for future use
 	}
 }
-func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) { // Trim any whitespace from the input and make it lowercase
+
+func DelayedAction(duration time.Duration, action func()) {
+	done := make(chan bool)
+
+	go func() {
+		time.Sleep(duration)
+		action() // Execute the specified action
+		done <- true
+	}()
+
+	<-done // Wait for the goroutine to complete
+}
+
+func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
 
 	switch input {
@@ -153,22 +228,30 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		CursorHide()
 		MoveCursor(7, 23)
 		fmt.Println(BgBlue + RedHi + "Exiting the game. Goodbye!" + Reset)
-		time.Sleep(1 * time.Second)
-		fmt.Print(BgBlue + RedHi + "                         " + Reset)
-		MoveCursor(7, 23)
-		CursorShow()
-		os.Exit(0)
+		DelayedAction(2*time.Second, func() {
+			fmt.Print(BgBlue + RedHi + "                         " + Reset)
+			MoveCursor(7, 23)
+			CursorShow()
+			os.Exit(0)
+		})
+
+	case "awards":
+		g.GameState.AppState = stateAwards
+		g.updateGameEnvironment()
 	default:
 		CursorHide()
 		MoveCursor(7, 23)
 		fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
-		time.Sleep(1 * time.Second)
-		MoveCursor(7, 23)
-		fmt.Print(BgBlue + RedHi + "                " + Reset)
-		MoveCursor(7, 23)
-		g.GameState.cursX, g.GameState.cursY = 7, 23
-		g.updateGameEnvironment() // Use this to display the correct environment based on the current state
-		CursorShow()
+
+		DelayedAction(1*time.Second, func() {
+			MoveCursor(7, 23)
+			fmt.Print(BgBlue + RedHi + "                " + Reset)
+			MoveCursor(7, 23)
+			g.GameState.cursX, g.GameState.cursY = 7, 23
+			g.updateGameEnvironment() // Use this to display the correct environment based on the current state
+			CursorShow()
+		})
+
 	}
 }
 
@@ -176,17 +259,19 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
 	switch input {
 	case "shit":
+		// Lock the mutex before accessing/modifying shared resources
+		g.mutex.Lock()
+		defer g.mutex.Unlock()
 		g.processShitCommand()
-	case "help":
-		g.showHelp()
 	case "quit":
+		// Similar to "shit," protect any shared resources with a mutex
+		g.mutex.Lock()
+		defer g.mutex.Unlock()
 		// Send a signal to stop the timer
 		stopChan <- true
 		safeClose(stopChan) // Safely close the channel
-
-		// Handle 'quit' during gameplay
-		g.cleanupGame() // Perform any necessary cleanup
-		g.GameState.AppState = stateMainMenu
+		g.cleanupGame()     // Perform any necessary cleanup
+		g.GameState.AppState = stateGameOver
 		g.updateGameEnvironment() // Properly load the main menu environment
 		return
 	default:
@@ -197,7 +282,6 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		MoveCursor(5, 24)
 		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
 		g.GameState.cursX, g.GameState.cursY = 5, 24
-
 	}
 }
 
@@ -207,55 +291,16 @@ func (g *Game) processShitCommand() {
 	// Example: Update GameState, trigger events, etc.
 }
 
-func (g *Game) showHelp() {
-	// Implement help instructions
-	fmt.Println("Help instructions go here...")
-	// Example: Display commands and descriptions
-}
-
-func (g *Game) showAwards() {
-	fmt.Println("Displaying Awards...")
-}
-
-func (g *Game) gameOver() {
-	// Display a game over message or perform other necessary actions
-	fmt.Println("Game Over! Time's up.")
-	time.Sleep(2 * time.Second)
-}
-
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {
-
-	ClearScreen()
-	CursorHide()
-	displayAnsiFile(ArtFileDir + "intro.ans")
-
-	PrintStringLoc("5", 40, 19)
-	time.Sleep(time.Second * 1)
-
-	PrintStringLoc("4", 40, 19)
-	time.Sleep(time.Second * 1)
-
-	PrintStringLoc("3", 40, 19)
-	time.Sleep(time.Second * 1)
-
-	PrintStringLoc("2", 40, 19)
-	time.Sleep(time.Second * 1)
-
-	PrintStringLoc("1", 40, 19)
-	time.Sleep(time.Second * 1)
-
-	PrintStringLoc("GO!", 39, 19)
-	time.Sleep(time.Second * 1)
-
-	CursorShow()
+	g.GameState.AppState = stateIntro
+	g.updateGameEnvironment()
 
 	g.GameState.AppState = statePlaying
 	g.updateGameEnvironment()
+
 	stopChan := make(chan bool)
 
 	go g.timer(stopChan)
-
-	fmt.Print(Reset)
 
 	var r []rune
 	for {
@@ -319,7 +364,6 @@ func safeClose(ch chan bool) {
 
 func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool) {
 	// Set up the game environment
-
 	g.GameState.AppState = stateMainMenu
 	g.setupGameEnvironment()
 	defer g.cleanupGameEnvironment()
@@ -372,6 +416,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 		// Update the game environment based on the current state
 		g.updateGameEnvironment()
 	}
+
 	close(doneChan) // Signal all goroutines to stop
 }
 
@@ -454,4 +499,10 @@ func main() {
 
 	// Start the game
 	game.run(inputChan, errorChan, doneChan)
+
+	// Ensure that the doneChan is closed when the program exits
+	defer close(doneChan)
+
+	// Additional cleanup or finalization code can go here
+
 }
