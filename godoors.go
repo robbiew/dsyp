@@ -58,8 +58,6 @@ var (
 	modalH int // in case height is odd
 	modalW int // in case width is odd
 
-	localDisplay bool // Added localDisplay as a global variable
-
 )
 
 // Common ANSI escapes sequences. This is not a complete list.
@@ -425,7 +423,7 @@ func ReadAnsiFile(filePath string) (string, error) {
 	return string(content), nil
 }
 
-func displayAnsiFile(filePath string) {
+func displayAnsiFile(filePath string, localDisplay bool) {
 	content, err := ReadAnsiFile(filePath)
 	if err != nil {
 		log.Fatalf("Error reading file %s: %v", filePath, err)

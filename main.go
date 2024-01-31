@@ -28,14 +28,16 @@ const (
 )
 
 type User struct {
-	Alias     string
-	TimeLeft  time.Duration
-	Emulation int
-	NodeNum   int
-	H         int
-	W         int
-	ModalH    int
-	ModalW    int
+	Alias        string
+	TimeLeft     time.Duration
+	Emulation    int
+	NodeNum      int
+	H            int
+	W            int
+	ModalH       int
+	ModalW       int
+	LocalDisplay bool
+	Awards       map[string]bool // Add the Awards field here
 }
 
 type Game struct {
@@ -43,6 +45,13 @@ type Game struct {
 	GameState GameState
 	Awards    map[string]bool
 	mutex     sync.Mutex
+}
+
+type Award struct {
+	ID          string
+	Name        string
+	Description string
+	Sequence    []string
 }
 
 type GameState struct {
@@ -60,6 +69,54 @@ type GameState struct {
 	AppState        int
 	DoneChan        chan bool
 	LastAppState    int
+}
+
+var awards = []Award{
+	{
+		ID:          "award1",
+		Name:        "First Award",
+		Description: "Earned when you say the magic words!",
+		Sequence:    []string{"magic", "words"},
+	},
+	{
+		ID:          "award2",
+		Name:        "Second Award",
+		Description: "Earned when you perform a certain action.",
+		Sequence:    []string{"action", "sequence"},
+	},
+	// Define more awards as needed
+}
+
+func checkForAwards(input string, awards []Award) []string {
+	earnedAwards := []string{}
+	inputWords := strings.Fields(strings.ToLower(input))
+
+	for _, award := range awards {
+		sequenceMatches := 0
+		for _, requiredWord := range award.Sequence {
+			for _, inputWord := range inputWords {
+				if requiredWord == inputWord {
+					sequenceMatches++
+					break
+				}
+			}
+		}
+		if sequenceMatches == len(award.Sequence) {
+			earnedAwards = append(earnedAwards, award.Name)
+		}
+	}
+
+	return earnedAwards
+}
+
+func (u *User) displayAwardArt(earnedAwards []string, awardArt map[string]string) {
+	for _, award := range earnedAwards {
+		art, exists := awardArt[award]
+		if exists {
+			// Display the ANSI art for the earned award
+			PrintAnsi(art+award+".ans", 0, u.LocalDisplay)
+		}
+	}
 }
 
 func inputLog(level int, userAlias string, message string) {
@@ -126,7 +183,7 @@ func readWrapper(inputChan chan byte, errorChan chan error, doneChan chan bool, 
 func (g *Game) setupGameEnvironment() {
 	// This function should set up the game environment (clear screen, display art, etc.)
 	ClearScreen()
-	displayAnsiFile(ArtFileDir + "main.ans")
+	displayAnsiFile(ArtFileDir+"main.ans", g.User.LocalDisplay)
 	MoveCursor(4, 2)
 	fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
 	// MoveCursor(6, 24)
@@ -140,7 +197,7 @@ func (g *Game) updateGameEnvironment() {
 		switch g.GameState.AppState {
 
 		case stateMainMenu:
-			displayAnsiFile(ArtFileDir + "main.ans")
+			displayAnsiFile(ArtFileDir+"main.ans", g.User.LocalDisplay)
 			MoveCursor(4, 2)
 			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
@@ -148,7 +205,7 @@ func (g *Game) updateGameEnvironment() {
 			fmt.Print(Reset)
 
 		case statePlaying:
-			displayAnsiFile(ArtFileDir + "start.ans")
+			displayAnsiFile(ArtFileDir+"start.ans", g.User.LocalDisplay)
 			MoveCursor(2, 23)
 			fmt.Print(BgBlue + CyanHi + "You need to take a shit. Bad." + Reset)
 			MoveCursor(5, 24) // Start from position 4 on the next line
@@ -173,7 +230,7 @@ func (g *Game) updateGameEnvironment() {
 		case stateIntro:
 			ClearScreen()
 			CursorHide()
-			displayAnsiFile(ArtFileDir + "intro.ans")
+			displayAnsiFile(ArtFileDir+"intro.ans", g.User.LocalDisplay)
 
 			PrintStringLoc("3", 40, 19)
 			DelayedAction(1*time.Second, func() {
@@ -244,9 +301,34 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		g.GameState.AppState = stateAwards
 		g.updateGameEnvironment()
 
-		// Wait for a single keypress
-		g.readSingleKeyPress(inputChan, stateMainMenu)
-
+		// Check if the user has earned any awards
+		if len(g.User.Awards) > 0 {
+			CursorHide()
+			MoveCursor(7, 23)
+			fmt.Println("Awards earned by", g.User.Alias+":")
+			for awardName := range g.User.Awards {
+				fmt.Println("- " + awardName)
+			}
+			DelayedAction(2*time.Second, func() {
+				fmt.Print(BgBlue + RedHi + "                         " + Reset)
+				MoveCursor(7, 23)
+				CursorShow()
+				g.GameState.AppState = stateMainMenu
+				g.setupGameEnvironment()
+				// Wait for a single keypress
+				g.readSingleKeyPress(inputChan, stateMainMenu)
+			})
+		} else {
+			ClearScreen()
+			CursorHide()
+			// User has no awards
+			fmt.Println("No awards earned yet by", g.User.Alias)
+			// Wait for a single keypress
+			g.readSingleKeyPress(inputChan, stateMainMenu)
+			g.GameState.AppState = stateMainMenu
+			MoveCursor(7, 23)
+			CursorShow()
+		}
 	default:
 		CursorHide()
 		MoveCursor(7, 23)
@@ -469,18 +551,20 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 
 func initializeGame(localDisplay bool, dropPath string) *Game {
 	// Initialize the User with either default values or based on command-line arguments
+
 	var user User
 	if localDisplay {
 		// Set default values when --local is used
 		user = User{
-			Alias:     "SysOp",
-			TimeLeft:  120 * time.Minute,
-			Emulation: 1,
-			NodeNum:   1,
-			H:         25,
-			W:         80,
-			ModalH:    25,
-			ModalW:    80,
+			Alias:        "SysOp",
+			TimeLeft:     120 * time.Minute,
+			Emulation:    1,
+			NodeNum:      1,
+			H:            25,
+			W:            80,
+			ModalH:       25,
+			ModalW:       80,
+			LocalDisplay: localDisplay,
 		}
 	} else {
 		// Check for required --path argument if --local is not set
