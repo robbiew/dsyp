@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,7 +15,6 @@ import (
 
 const (
 	ArtFileDir    = "art/"
-	ansi          = "[\u001B\u009B][[\\]()#;?]*(?:(?:(?:[a-zA-Z\\d]*(?:;[a-zA-Z\\d]*)*)?\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PRZcf-ntqry=><~]))"
 	stateMainMenu = iota
 	statePlaying
 	stateQuit
@@ -224,8 +224,6 @@ func DelayedAction(duration time.Duration, action func()) {
 }
 
 func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) {
-	input = strings.TrimSpace(strings.ToLower(input))
-
 	switch input {
 	case "play":
 		g.GameState.AppState = statePlaying
@@ -266,7 +264,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 }
 
 func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
-	input = strings.TrimSpace(strings.ToLower(input))
+
 	if input != "" {
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
@@ -300,9 +298,15 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 
 func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
 	// Wait for a single keypress
+
+	CursorHide()
+	MoveCursor(0, 23)
+	CenterText("Press a Key to Continue", 80)
+
 	<-inputChan
 
 	// Transition to the nextState immediately upon any keypress
+	CursorShow()
 	g.GameState.AppState = nextState
 	g.updateGameEnvironment()
 }
@@ -331,7 +335,8 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 		case char := <-inputChan:
 			runeChar := rune(char) // Convert byte to rune
 			if runeChar == '\r' || runeChar == '\n' {
-				input := string(r)
+
+				input := sanitizeInput(strings.ToLower(string(r)))
 				r = nil // Reset buffer
 				fmt.Print(Reset)
 
@@ -375,6 +380,20 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 	}
 }
 
+func sanitizeInput(input string) string {
+	// Remove leading and trailing spaces
+	input = strings.TrimSpace(input)
+
+	// Remove any invalid characters or perform additional sanitization if needed
+	// For example, you can use a regular expression to allow only specific characters
+
+	// Example: Allow only letters, digits, and spaces
+	validChars := regexp.MustCompile(`[^a-zA-Z0-9 ]`)
+	input = validChars.ReplaceAllString(input, "")
+
+	return input
+}
+
 // Safe channel close utility function
 func safeClose(ch chan bool) {
 	select {
@@ -409,8 +428,11 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 		fmt.Print(BgBlue + YellowHi)
 		select {
 		case char := <-inputChan:
+			runeChar := rune(char)
+			key := string(runeChar)
+
 			if char == '\r' || char == '\n' {
-				input := string(r)
+				input := sanitizeInput(strings.ToLower(string(r)))
 				r = nil          // Reset buffer
 				fmt.Print(Reset) // Move to the next line
 				if g.GameState.AppState == stateMainMenu {
@@ -426,7 +448,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 				}
 			} else {
 				// Regular character input
-				fmt.Print(string(char)) // Print character as it's typed
+				fmt.Print(key) // Print character as it's typed
 				r = append(r, rune(char))
 				g.GameState.cursX++
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
