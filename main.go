@@ -19,7 +19,6 @@ const (
 	statePlaying
 	stateQuit
 	stateGameOver
-	stateAwards
 	stateHelp
 	stateIntro
 	LogLevelInput = iota
@@ -77,6 +76,7 @@ func inputLog(level int, userAlias string, message string) {
 func enableRawMode() (*unix.Termios, error) {
 	originalState, err := unix.IoctlGetTermios(int(os.Stdin.Fd()), unix.TCGETS)
 	if err != nil {
+		inputLog(LogLevelError, "SysOp", "Failed to get terminal state")
 		return nil, err
 	}
 
@@ -87,6 +87,7 @@ func enableRawMode() (*unix.Termios, error) {
 	newState.Lflag &^= unix.IXON   // Disable XON/XOFF flow control
 
 	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, &newState); err != nil {
+		inputLog(LogLevelError, "SysOp", "Failed to set terminal state")
 		return nil, err
 	}
 
@@ -95,6 +96,7 @@ func enableRawMode() (*unix.Termios, error) {
 
 func disableRawMode(originalState *unix.Termios) error {
 	if err := unix.IoctlSetTermios(int(os.Stdin.Fd()), unix.TCSETS, originalState); err != nil {
+		inputLog(LogLevelError, "SysOp", "Failed to restore terminal state")
 		return err
 	}
 	return nil
@@ -109,6 +111,7 @@ func readWrapper(inputChan chan byte, errorChan chan error, doneChan chan bool, 
 			buf := make([]byte, 1) // Read one byte at a time
 			n, err := os.Stdin.Read(buf)
 			if err != nil {
+				inputLog(LogLevelError, "SysOp", "Failed to read input")
 				errorChan <- err
 				return
 			}
@@ -152,29 +155,18 @@ func (g *Game) updateGameEnvironment() {
 			g.GameState.cursX, g.GameState.cursY = 5, 24
 			fmt.Print(Reset)
 
-		case stateAwards:
-			CursorHide()
-			fmt.Println("Displaying Awards...")
-
-			Pause(24, 80)
-
-			// DelayedAction(2*time.Second, func() {
-			// 	fmt.Println("Done")
-			// })
-
-			CursorShow()
-			fmt.Print(Reset)
-			g.GameState.AppState = stateMainMenu
-			g.setupGameEnvironment()
-			g.GameState.cursX, g.GameState.cursY = 7, 23
-			MoveCursor(7, 23)
-
 		case stateGameOver:
 			CursorHide()
 			fmt.Println("Game Over! Time's up.")
-
 			DelayedAction(2*time.Second, func() {
 				fmt.Print("Done")
+			})
+
+			ClearScreen()
+			fmt.Println("Displaying Awards...")
+
+			DelayedAction(2*time.Second, func() {
+				fmt.Println("Done")
 			})
 
 			CursorShow()
@@ -257,8 +249,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		})
 
 	case "awards":
-		g.GameState.AppState = stateAwards
-		g.updateGameEnvironment()
+		// Display the awards screen
 	default:
 		CursorHide()
 		MoveCursor(7, 23)
@@ -272,13 +263,14 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 			g.updateGameEnvironment() // Use this to display the correct environment based on the current state
 			CursorShow()
 		})
-
 	}
 }
 
 func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 	input = strings.TrimSpace(strings.ToLower(input))
-	inputLog(LogLevelInput, g.User.Alias, input)
+	if input != "" {
+		inputLog(LogLevelInput, g.User.Alias, input)
+	}
 	switch input {
 	case "shit":
 		// Lock the mutex before accessing/modifying shared resources
@@ -294,7 +286,7 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		safeClose(stopChan) // Safely close the channel
 		g.cleanupGame()     // Perform any necessary cleanup
 		g.GameState.AppState = stateGameOver
-		g.updateGameEnvironment() // Properly load the main menu environment
+		g.updateGameEnvironment()
 		return
 	default:
 		MoveCursor(2, 23)
@@ -361,6 +353,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 
 		case err := <-errorChan:
 			fmt.Println("Error reading input:", err)
+			log.Print("Error reading input:", err)
 			safeClose(stopChan) // Safely close the stop channel
 			// Cleanup and exit the game
 			return
@@ -397,6 +390,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 	// Enable raw mode
 	originalState, err := enableRawMode()
 	if err != nil {
+		inputLog(LogLevelError, "SysOp", "Failed to enable raw mode")
 		fmt.Fprintln(os.Stderr, "Failed to enable raw mode:", err)
 		os.Exit(1)
 	}
@@ -431,6 +425,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 			}
 
 		case err := <-errorChan:
+			inputLog(LogLevelError, "SysOp", "Error reading input")
 			fmt.Println("Error reading input:", err)
 			return
 		}
@@ -460,6 +455,7 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 	} else {
 		// Check for required --path argument if --local is not set
 		if dropPath == "" {
+			inputLog(LogLevelError, "SysOp", "Missing required -path argument")
 			fmt.Fprintln(os.Stderr, "missing required -path argument")
 			os.Exit(2)
 		}
