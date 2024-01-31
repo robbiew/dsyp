@@ -21,6 +21,7 @@ const (
 	stateGameOver
 	stateHelp
 	stateIntro
+	stateAwards
 	LogLevelInput = iota
 	LogLevelWarning
 	LogLevelError
@@ -162,13 +163,6 @@ func (g *Game) updateGameEnvironment() {
 				fmt.Print("Done")
 			})
 
-			ClearScreen()
-			fmt.Println("Displaying Awards...")
-
-			DelayedAction(2*time.Second, func() {
-				fmt.Println("Done")
-			})
-
 			CursorShow()
 			fmt.Print(Reset)
 			g.GameState.AppState = stateMainMenu
@@ -249,7 +243,12 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		})
 
 	case "awards":
-		// Display the awards screen
+		g.GameState.AppState = stateAwards
+		g.updateGameEnvironment()
+
+		// Wait for a single keypress
+		g.readSingleKeyPress(inputChan, stateMainMenu)
+
 	default:
 		CursorHide()
 		MoveCursor(7, 23)
@@ -297,6 +296,15 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
 		g.GameState.cursX, g.GameState.cursY = 5, 24
 	}
+}
+
+func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
+	// Wait for a single keypress
+	<-inputChan
+
+	// Transition to the nextState immediately upon any keypress
+	g.GameState.AppState = nextState
+	g.updateGameEnvironment()
 }
 
 func (g *Game) processShitCommand() {
