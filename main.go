@@ -182,13 +182,6 @@ func (g *Game) updateGameEnvironment() {
 			fmt.Print(Reset)
 
 		case stateGameOver:
-			CursorHide()
-			fmt.Println("Game Over!")
-			DelayedAction(2*time.Second, func() {
-				fmt.Print("Done")
-			})
-
-			CursorShow()
 			fmt.Print(Reset)
 			g.GameState.AppState = stateMainMenu
 			g.setupGameEnvironment()
@@ -353,14 +346,10 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 			if input == verb {
 				g.mutex.Lock()
 				defer g.mutex.Unlock()
-				g.processShitCommand(inputChan)
-				// Similar to "shit," protect any shared resources with a mutex
-				g.mutex.Lock()
-				defer g.mutex.Unlock()
-				// Send a signal to stop the timer
 				stopChan <- true
 				safeClose(stopChan) // Safely close the channel
-				g.cleanupGame()     // Perform any necessary cleanup
+				g.processShitCommand(inputChan)
+				g.cleanupGame() // Perform any necessary cleanup
 				g.GameState.AppState = stateGameOver
 				g.updateGameEnvironment()
 				return
@@ -420,7 +409,6 @@ func (g *Game) processShitCommand(inputChan chan byte) {
 				fmt.Println(awardName)
 			}
 		}
-
 		// Pause for a keypress
 		g.readSingleKeyPress(inputChan, stateMainMenu)
 	} else {
@@ -432,10 +420,6 @@ func (g *Game) processShitCommand(inputChan chan byte) {
 		g.readSingleKeyPress(inputChan, stateMainMenu)
 	}
 
-	// Transition to the main menu
-	g.GameState.AppState = stateMainMenu
-	MoveCursor(7, 23)
-	CursorShow()
 }
 
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {

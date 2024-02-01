@@ -80,6 +80,9 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 				// Pause for a keypress
 				g.readSingleKeyPress(inputChan, stateAwards)
 
+				// Clear the input buffer here
+				g.UserInputBuffer = []string{}
+
 				// Break out of the loop after granting an award
 				return
 
@@ -92,6 +95,9 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 
 				// Pause for a keypress
 				g.readSingleKeyPress(inputChan, stateAwards)
+
+				// Clear the input buffer here
+				g.UserInputBuffer = []string{}
 
 				// Break out of the loop after granting an award
 				return
