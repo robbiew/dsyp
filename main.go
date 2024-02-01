@@ -37,21 +37,15 @@ type User struct {
 	ModalH       int
 	ModalW       int
 	LocalDisplay bool
-	Awards       map[string]bool // Add the Awards field here
+	Awards       map[string]bool
 }
 
 type Game struct {
-	User      User
-	GameState GameState
-	Awards    map[string]bool
-	mutex     sync.Mutex
-}
-
-type Award struct {
-	ID          string
-	Name        string
-	Description string
-	Sequence    []string
+	User            User
+	GameState       GameState
+	Awards          map[string]bool
+	mutex           sync.Mutex
+	UserInputBuffer []string
 }
 
 type GameState struct {
@@ -69,54 +63,6 @@ type GameState struct {
 	AppState        int
 	DoneChan        chan bool
 	LastAppState    int
-}
-
-var awards = []Award{
-	{
-		ID:          "award1",
-		Name:        "First Award",
-		Description: "Earned when you say the magic words!",
-		Sequence:    []string{"magic", "words"},
-	},
-	{
-		ID:          "award2",
-		Name:        "Second Award",
-		Description: "Earned when you perform a certain action.",
-		Sequence:    []string{"action", "sequence"},
-	},
-	// Define more awards as needed
-}
-
-func checkForAwards(input string, awards []Award) []string {
-	earnedAwards := []string{}
-	inputWords := strings.Fields(strings.ToLower(input))
-
-	for _, award := range awards {
-		sequenceMatches := 0
-		for _, requiredWord := range award.Sequence {
-			for _, inputWord := range inputWords {
-				if requiredWord == inputWord {
-					sequenceMatches++
-					break
-				}
-			}
-		}
-		if sequenceMatches == len(award.Sequence) {
-			earnedAwards = append(earnedAwards, award.Name)
-		}
-	}
-
-	return earnedAwards
-}
-
-func (u *User) displayAwardArt(earnedAwards []string, awardArt map[string]string) {
-	for _, award := range earnedAwards {
-		art, exists := awardArt[award]
-		if exists {
-			// Display the ANSI art for the earned award
-			PrintAnsi(art+award+".ans", 0, u.LocalDisplay)
-		}
-	}
 }
 
 func inputLog(level int, userAlias string, message string) {
@@ -303,12 +249,8 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 
 		// Check if the user has earned any awards
 		if len(g.User.Awards) > 0 {
-			CursorHide()
-			MoveCursor(7, 23)
-			fmt.Println("Awards earned by", g.User.Alias+":")
-			for awardName := range g.User.Awards {
-				fmt.Println("- " + awardName)
-			}
+			// Display the user's awards
+
 			DelayedAction(2*time.Second, func() {
 				fmt.Print(BgBlue + RedHi + "                         " + Reset)
 				MoveCursor(7, 23)
@@ -350,6 +292,10 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 	if input != "" {
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
+
+	// Append the words to the user's input buffer for awards tracking
+	g.UserInputBuffer = append(g.UserInputBuffer, input)
+
 	switch input {
 	case "shit":
 		// Lock the mutex before accessing/modifying shared resources
@@ -376,6 +322,7 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
 		g.GameState.cursX, g.GameState.cursY = 5, 24
 	}
+	g.checkAndGrantAwards()
 }
 
 func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
@@ -603,6 +550,9 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 		GameState: gameState,
 		Awards:    awards,
 	}
+
+	// Initialize User.Awards map
+	game.User.Awards = make(map[string]bool)
 
 	return game
 }
