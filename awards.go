@@ -11,6 +11,7 @@ type Award struct {
 	Description     string
 	Art             string
 	AwardConditions []string
+	MainMenu        bool
 }
 
 var awards = []Award{
@@ -19,14 +20,16 @@ var awards = []Award{
 		Name:            "Thinking (and shitting) inside the box",
 		Description:     "Congratulations, all that potty training finally paid off.",
 		Art:             "award3.ans",
-		AwardConditions: []string{"play", "fart lightly", "pull door", "remove pants", "go to bathroom", "shit"},
+		AwardConditions: []string{"fart lightly", "pull door", "remove pants", "go to bathroom", "shit"},
+		MainMenu:        false,
 	},
 	{
 		ID:              "award3",
 		Name:            "Shitting 101",
 		Description:     "Sometimes even zero effort is rewarded.",
 		Art:             "award3.ans",
-		AwardConditions: []string{"play", "shit"},
+		AwardConditions: []string{"shit"},
+		MainMenu:        false,
 	},
 	{
 		ID:              "award8",
@@ -34,63 +37,59 @@ var awards = []Award{
 		Description:     "You shit before the game began!",
 		Art:             "award8.ans",
 		AwardConditions: []string{"shit"},
+		MainMenu:        true,
 	},
 
 	// Define more awards as needed
 }
 
-func matchesCondition(inputBuffer []string, conditions []string) bool {
-	for _, condition := range conditions {
-		condition = strings.TrimSpace(strings.ToLower(condition))
-		found := false
-
-		// Check if the condition exists in the inputBuffer
-		for _, input := range inputBuffer {
-			input = strings.TrimSpace(strings.ToLower(input))
-			if input == condition {
-				found = true
-				break
-			}
-		}
-
-		// If the condition is not found in the inputBuffer, return false
-		if !found {
-			return false
-		}
-	}
-
-	// If all conditions are found, return true
-	return true
-}
-
 func (g *Game) checkAndGrantAwards(inputChan chan byte) {
-	// Check if the user has earned any awards
+	// Check if the user is in the main menu state
+	isMainMenu := g.GameState.AppState == stateMainMenu
+
+	// Iterate over awards
 	for _, award := range awards {
-		if matchesCondition(g.UserInputBuffer, award.AwardConditions) {
-			if award.ID == "award8" {
+		// Check if the award is eligible to be granted based on the MainMenu field
+		if (award.MainMenu && isMainMenu) || (!award.MainMenu && !isMainMenu) {
+			// Initialize a flag to track if all conditions are met
+			allConditionsMet := true
 
-				// Grant the award to the user
+			// Iterate over conditions for the award
+			for _, condition := range award.AwardConditions {
+				// Split the condition into words
+				conditionWords := strings.Fields(condition)
+
+				// Initialize a flag to track if any condition word is met
+				conditionMet := false
+
+				// Iterate over input buffer
+				for _, input := range g.UserInputBuffer {
+					// Check if any input word matches any condition word
+					for _, conditionWord := range conditionWords {
+						if isPoopVerb(input) && containsWord(input, conditionWord) {
+							conditionMet = true
+							break
+						}
+					}
+
+					if conditionMet {
+						break
+					}
+				}
+
+				// If any condition word is not met, set allConditionsMet to false
+				if !conditionMet {
+					allConditionsMet = false
+					break
+				}
+			}
+
+			// If all conditions are met, grant the award
+			if allConditionsMet {
 				g.User.Awards[award.ID] = true
-				// Display the award art here
-				//awardArt := award.Art
-				//displayAnsiFile(ArtFileDir+awardArt, g.User.LocalDisplay)
+
+				// Display the award message
 				ClearScreen()
-				fmt.Print("Congratulations! You've earned the Shitting at the starting gun award!\n")
-
-				// Pause for a keypress
-				g.readSingleKeyPress(inputChan, stateAwards)
-
-				// Clear the input buffer here
-				g.UserInputBuffer = []string{}
-
-				// Break out of the loop after granting an award
-				return
-
-			} else {
-				// For other awards, grant them normally
-				g.User.Awards[award.ID] = true
-				ClearScreen()
-				// You can also display the award art here
 				fmt.Printf("Congratulations! You've earned the %s award!\n", award.Name)
 
 				// Pause for a keypress
@@ -99,11 +98,26 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 				// Clear the input buffer here
 				g.UserInputBuffer = []string{}
 
-				// Break out of the loop after granting an award
+				// Exit the loop after granting an award
 				return
 			}
 		}
 	}
+}
+
+func isPoopVerb(word string) bool {
+	poopVerbs := []string{"poop", "poo", "crap", "dump", "shit", "defecate"} // Add your poop verbs here
+	word = strings.TrimSpace(strings.ToLower(word))
+	for _, verb := range poopVerbs {
+		if verb == word {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWord(input, condition string) bool {
+	return strings.Contains(input, condition)
 }
 
 // Function to get the award name by ID

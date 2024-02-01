@@ -246,8 +246,14 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
 
-	// Append the words to the user's input buffer for awards tracking
-	g.UserInputBuffer = append(g.UserInputBuffer, input)
+	// Check if the input matches any verb from poopVerbs
+	for _, verb := range poopVerbs {
+		if input == verb {
+			// If a match is found, add the "main" word to the user's input buffer
+			g.UserInputBuffer = append(g.UserInputBuffer, "shit")
+			break
+		}
+	}
 
 	switch input {
 	case "play":
@@ -296,8 +302,6 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 				g.mutex.Lock()
 				defer g.mutex.Unlock()
 				g.processShitCommand(inputChan)
-				// Similar to "shit," protect any shared resources with a mutex
-
 				g.GameState.AppState = stateMainMenu
 				g.updateGameEnvironment()
 				return
@@ -325,9 +329,14 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
 
-	// Append the words to the user's input buffer for awards tracking
-	g.UserInputBuffer = append(g.UserInputBuffer, input)
-
+	// Check if the input matches any verb from poopVerbs
+	for _, verb := range poopVerbs {
+		if input == verb {
+			// If a match is found, add the "main" word to the user's input buffer
+			g.UserInputBuffer = append(g.UserInputBuffer, "shit")
+			break
+		}
+	}
 	switch input {
 	case "quit":
 		// Similar to "shit," protect any shared resources with a mutex
