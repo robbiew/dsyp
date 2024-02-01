@@ -11,7 +11,7 @@ type Award struct {
 	Description     string
 	Art             string
 	AwardConditions []string
-	MainMenu        bool
+	OnMainMenu      bool
 }
 
 var awards = []Award{
@@ -21,7 +21,7 @@ var awards = []Award{
 		Description:     "Congratulations, all that potty training finally paid off.",
 		Art:             "award3.ans",
 		AwardConditions: []string{"fart lightly", "pull door", "remove pants", "go to bathroom", "shit"},
-		MainMenu:        false,
+		OnMainMenu:      false,
 	},
 	{
 		ID:              "award3",
@@ -29,7 +29,7 @@ var awards = []Award{
 		Description:     "Sometimes even zero effort is rewarded.",
 		Art:             "award3.ans",
 		AwardConditions: []string{"shit"},
-		MainMenu:        false,
+		OnMainMenu:      false,
 	},
 	{
 		ID:              "award8",
@@ -37,7 +37,7 @@ var awards = []Award{
 		Description:     "You shit before the game began!",
 		Art:             "award8.ans",
 		AwardConditions: []string{"shit"},
-		MainMenu:        true,
+		OnMainMenu:      true,
 	},
 
 	// Define more awards as needed
@@ -45,12 +45,29 @@ var awards = []Award{
 
 func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 	// Check if the user is in the main menu state
-	isMainMenu := g.GameState.AppState == stateMainMenu
+
+	// Create a map to store verb and noun lists
+	lists := map[string][]string{
+		"poopVerbs":      poopVerbs,
+		"lookVerbs":      lookVerbs,
+		"openVerbs":      openVerbs,
+		"breakVerbs":     breakVerbs,
+		"pullVerbs":      pullVerbs,
+		"closeVerbs":     closeVerbs,
+		"removeVerbs":    removeVerbs,
+		"wearVerbs":      wearVerbs,
+		"moveVerbs":      moveVerbs,
+		"eatVerbs":       eatVerbs,
+		"dieVerbs":       dieVerbs,
+		"lightlyAdverbs": lightlyAdverbs,
+		"bathroomNouns":  bathroomNouns,
+		"pillsNouns":     pillsNouns,
+	}
 
 	// Iterate over awards
 	for _, award := range awards {
 		// Check if the award is eligible to be granted based on the MainMenu field
-		if (award.MainMenu && isMainMenu) || (!award.MainMenu && !isMainMenu) {
+		if (award.OnMainMenu && g.GameState.OnMainMenu) || (!award.OnMainMenu && !g.GameState.OnMainMenu) {
 			// Initialize a flag to track if all conditions are met
 			allConditionsMet := true
 
@@ -64,9 +81,10 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 
 				// Iterate over input buffer
 				for _, input := range g.UserInputBuffer {
-					// Check if any input word matches any condition word
+					// Check if any input word matches any condition word from any list
 					for _, conditionWord := range conditionWords {
-						if isPoopVerb(input) && containsWord(input, conditionWord) {
+						conditionWord = strings.ToLower(conditionWord)
+						if containsWordFromLists(input, conditionWord, lists) {
 							conditionMet = true
 							break
 						}
@@ -101,23 +119,29 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 				// Exit the loop after granting an award
 				return
 			}
+		} else {
+			// no award to grant
+			ClearScreen()
+
+			// Clear the input buffer here
+			g.UserInputBuffer = []string{}
+			return
 		}
 	}
 }
 
-func isPoopVerb(word string) bool {
-	poopVerbs := []string{"poop", "poo", "crap", "dump", "shit", "defecate"} // Add your poop verbs here
-	word = strings.TrimSpace(strings.ToLower(word))
-	for _, verb := range poopVerbs {
-		if verb == word {
-			return true
+// Function to check if a word contains any of the possible verb or noun options
+func containsWordFromLists(word, conditionWord string, lists map[string][]string) bool {
+	conditionWord = strings.ToLower(conditionWord)
+	for _, list := range lists {
+		for _, option := range list {
+			option = strings.ToLower(option)
+			if strings.Contains(word, option) && strings.Contains(conditionWord, option) {
+				return true
+			}
 		}
 	}
 	return false
-}
-
-func containsWord(input, condition string) bool {
-	return strings.Contains(input, condition)
 }
 
 // Function to get the award name by ID

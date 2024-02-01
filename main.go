@@ -43,6 +43,24 @@ var (
 	lightlyAdverbs = []string{"lightly", "light", "gently", "softly", "soft", "little", "small", "tiny"}
 )
 
+// Define a map to associate each list of words with its corresponding "Main Word"
+var mainWordMappings = map[string]string{
+	"lookVerbs":      "look",
+	"openVerbs":      "open",
+	"breakVerbs":     "break",
+	"pullVerbs":      "pull",
+	"closeVerbs":     "close",
+	"removeVerbs":    "remove",
+	"wearVerbs":      "wear",
+	"moveVerbs":      "move",
+	"poopVerbs":      "shit",
+	"eatVerbs":       "eat",
+	"dieVerbs":       "die",
+	"lightlyAdverbs": "lightly",
+	"bathroomNouns":  "bathroom",
+	"pillsNouns":     "pills",
+}
+
 // Noun lists
 var (
 	bathroomNouns = []string{"bathroom", "washroom", "restroom"}
@@ -85,6 +103,7 @@ type GameState struct {
 	AppState        int
 	DoneChan        chan bool
 	LastAppState    int
+	OnMainMenu      bool
 }
 
 func inputLog(level int, userAlias string, message string) {
@@ -165,6 +184,7 @@ func (g *Game) updateGameEnvironment() {
 		switch g.GameState.AppState {
 
 		case stateMainMenu:
+			g.GameState.OnMainMenu = true
 			displayAnsiFile(ArtFileDir+"main.ans", g.User.LocalDisplay)
 			MoveCursor(4, 2)
 			fmt.Printf(BgMagenta+YellowHi+"%s"+WhiteHi+":"+Reset, g.User.Alias)
@@ -173,15 +193,17 @@ func (g *Game) updateGameEnvironment() {
 			fmt.Print(Reset)
 
 		case statePlaying:
+			g.GameState.OnMainMenu = false
 			displayAnsiFile(ArtFileDir+"start.ans", g.User.LocalDisplay)
 			MoveCursor(2, 23)
 			fmt.Print(BgBlue + CyanHi + "You need to take a shit. Bad." + Reset)
-			MoveCursor(5, 24) // Start from position 4 on the next line
+			MoveCursor(5, 24)
 			fmt.Print(YellowHi)
 			g.GameState.cursX, g.GameState.cursY = 5, 24
 			fmt.Print(Reset)
 
 		case stateGameOver:
+			g.GameState.OnMainMenu = false
 			fmt.Print(Reset)
 			g.GameState.AppState = stateMainMenu
 			g.setupGameEnvironment()
@@ -189,6 +211,7 @@ func (g *Game) updateGameEnvironment() {
 			MoveCursor(7, 23)
 
 		case stateIntro:
+			g.GameState.OnMainMenu = false
 			ClearScreen()
 			CursorHide()
 			displayAnsiFile(ArtFileDir+"intro.ans", g.User.LocalDisplay)
@@ -259,7 +282,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 	case "play":
 		g.GameState.AppState = statePlaying
 		g.startGame(inputChan, errorChan, doneChan)
-	case "quit":
+	case "quit", "exit":
 		g.GameState.AppState = stateQuit
 		CursorHide()
 		MoveCursor(7, 23)
@@ -329,14 +352,12 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
 
-	// Check if the input matches any verb from poopVerbs
-	for _, verb := range poopVerbs {
-		if input == verb {
-			// If a match is found, add the "main" word to the user's input buffer
-			g.UserInputBuffer = append(g.UserInputBuffer, "shit")
-			break
-		}
+	// Check if the input matches any of the "Main Words" from the mappings
+	if mainWord, ok := mainWordMappings[input]; ok {
+		// If a match is found, add the "Main Word" to the user's input buffer
+		g.UserInputBuffer = append(g.UserInputBuffer, mainWord)
 	}
+
 	switch input {
 	case "quit":
 		// Similar to "shit," protect any shared resources with a mutex
@@ -358,8 +379,7 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 				stopChan <- true
 				safeClose(stopChan) // Safely close the channel
 				g.processShitCommand(inputChan)
-				g.cleanupGame() // Perform any necessary cleanup
-				g.GameState.AppState = stateGameOver
+				g.GameState.AppState = stateMainMenu
 				g.updateGameEnvironment()
 				return
 			}
@@ -424,7 +444,21 @@ func (g *Game) processShitCommand(inputChan chan byte) {
 		// If no awards were earned, display the failure screen (replace 'failureArt' with actual art file)
 		//failureArt := "failure.ans" // Example failure art file
 		//displayAnsiFile(ArtFileDir+failureArt, g.User.LocalDisplay)
+		// Display user's awards with keypress pause
 
+		fmt.Println("You shit your pants. You lose.")
+		g.readSingleKeyPress(inputChan, stateAwards)
+
+		fmt.Println("Awards earned by", g.User.Alias+":")
+		for awardID, earned := range g.User.Awards {
+			if earned {
+				// Print the name of the award
+				awardName := getAwardNameByID(awardID)
+				fmt.Println(awardName)
+			} else {
+				fmt.Println("No awards!")
+			}
+		}
 		// Pause for a keypress
 		g.readSingleKeyPress(inputChan, stateMainMenu)
 	}
@@ -487,7 +521,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 
 		}
 		// Check if the state has changed to MainMenu, if so, break the loop
-		if g.GameState.AppState == stateMainMenu {
+		if g.GameState.AppState != statePlaying {
 			return
 		}
 		fmt.Print(Reset)
@@ -624,6 +658,7 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 		AppState:        stateMainMenu,
 		DoneChan:        make(chan bool),
 		LastAppState:    stateMainMenu,
+		OnMainMenu:      true,
 	}
 
 	// Initialize a map for tracking awards
