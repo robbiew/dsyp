@@ -237,10 +237,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		MoveCursor(7, 23)
 		fmt.Println(BgBlue + RedHi + "Exiting the game. Goodbye!" + Reset)
 		DelayedAction(2*time.Second, func() {
-			fmt.Print(BgBlue + RedHi + "                         " + Reset)
-			MoveCursor(7, 23)
 			CursorShow()
-			os.Exit(0)
 		})
 
 	case "awards":
@@ -558,10 +555,10 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 }
 
 func main() {
-	// Create a log file and set log output
-	file, err := os.Create("game.log")
+	// Open or create the log file in append mode
+	file, err := os.OpenFile("game.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatal("Cannot create log file:", err)
+		log.Fatal("Cannot open log file:", err)
 	}
 	defer file.Close()
 
@@ -590,10 +587,5 @@ func main() {
 
 	// Start the game
 	game.run(inputChan, errorChan, doneChan)
-
-	// Ensure that the doneChan is closed when the program exits
-	defer close(doneChan)
-
-	// Additional cleanup or finalization code can go here
 
 }
