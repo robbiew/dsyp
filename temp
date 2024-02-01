@@ -1,0 +1,715 @@
+-- don't shit yourself
+
+function _init()
+    poke(0x5f2d, 1)
+    timer=0
+    timer_display=0
+    screen="menu"
+    input=""
+    invalid_cmd=nil
+    ending=nil
+    pants=true
+    door=false
+    standing=true
+    farts=0
+    pills=false
+    pill_timer=nil
+    message=""
+    overflow=nil
+    overflow2=nil
+    redmessage=nil
+    cartdata("pcc_dont_shit_your_pants")
+    awards={}
+    for i=1,10 do
+     awards[i]=dget(i)>0
+    end
+    sfx(8,0)
+   end
+   
+   function update_input()
+    while stat(30) do
+     local c=stat(31)
+     if c=="\r" then
+      poke(0x5f30,1)
+      process_input()
+      input=""
+     elseif ord(c)==8 then
+      input=sub(input,1,#input-1)
+     else
+      if c=="p" then
+       poke(0x5f30,1)
+      end
+      input=input..c
+     end
+    end
+   end
+   
+   function _update()
+    if screen=="menu" then
+     update_input()
+    elseif screen=="game" then
+     if pill_timer then
+      pill_timer-=1
+      if pill_timer<=0 then
+       screen="end"
+       ending="pillsworked"
+       message="the pills worked!\nyou didn't shit your pants.\ncongratulations!"
+       awards[6]=true
+       awards[7]=true
+       pill_timer=150
+       sfx(10,0)
+      end
+     end
+     timer-=1
+     if timer<=0 then
+      screen="end"
+      if pants then
+       ending="sadman"
+       message="you couldn't hold it anymore,\nyou just shit your pants!\ngame over!"
+       awards[9]=true
+       sfx(9,0)
+      else
+       ending="floorshit"
+       message="you couldn't hold it anymore,\nyou had to shit!\ngood thing your pants were off.\ncongratulations!"
+       awards[9]=true
+       sfx(10,0)
+      end
+     elseif timer==120 and not farted then
+      overflow2=nil
+      overflow="omg it's peeking its head!"
+      message="do something about the gas\nbuild up!"
+     elseif timer==570 and not farted then
+      overflow2=nil
+      overflow="you're running out of time."
+      message="you need to find a way to reduce\nthe pressure in your gut."
+     end
+     if timer_display<timer then
+      timer_display+=30
+     end
+     if timer_display>timer then
+      timer_display=timer
+     end
+     update_input()
+    elseif screen=="end" then
+     if pill_timer then
+      pill_timer-=1
+      if pill_timer<=0 then
+       if ending=="pillsworked" then
+        ending="pillsuhoh"
+        message="\nuh oh. wait a minute..."
+        pill_timer=60
+       elseif ending=="pillsuhoh" then
+        ending="pillsshit"
+        message="\nawww, you just shit your pants.\nmaybe they didn't work so well..."
+        pill_timer=nil
+       else
+        pill_timer=nil
+       end
+      end
+     end
+     if btnp(6) then
+      poke(0x5f30,1)
+      if ending!="pillsworked" then
+       screen="awards"
+      end
+      sfx(-1,0)
+     end
+    elseif screen=="awards" then
+     for a=1,10 do
+      dset(a,awards[a] and 1 or 0)
+     end
+     if not awards[10] then
+      local final=true
+      for a=1,9 do
+       if not awards[a] then
+        final=false
+        break
+       end
+      end
+      if final then
+       awards[10]=true
+      end
+     end
+     while stat(30) do
+      stat(31)
+     end
+     if btnp(6) then
+      poke(0x5f30,1)
+      screen="menu"
+      message=""
+     end
+    elseif screen=="credits" then
+     if btnp(6) then
+      poke(0x5f30,1)
+      screen="menu"
+     end
+    end
+   end
+   
+   function draw_man(x,y,face,standing,pants,arms_up)
+    local arms_up=arms_up or face=="happy"
+    palt(0,false)
+    palt(2,true)
+    if arms_up then
+     spr(7,x-9,y-2,2,4)
+     spr(9,x+18,y-2,2,4)
+    else
+     spr(3,x-6,y+26,2,4)
+     spr(5,x+18,y+26,2,4)
+    end
+    if face=="neutral" then
+     spr(64,x,y,3,4)
+     if awards[10] then
+      spr(102,x+2,y-10,3,2)
+     end
+    elseif face=="happy" then
+     spr(64,x,y,3,4)
+     line(x+10,y+15,x+13,y+15,4)
+     if awards[10] then
+      spr(102,x+2,y-10,3,2)
+     end
+    elseif face=="sad" then
+     spr(83,x,y+8,3,3)
+     if awards[10] then
+      spr(102,x+2,y,3,2)
+     end
+    end
+    spr(128,x,y+32,4,2)
+    if standing then
+     local s=pants and 160 or 164
+     spr(s,x,y+48,4,6)
+    else
+     local s=pants and 204 or 200
+     spr(s,x-1,y+48,4,4)
+    end
+    palt()
+   end
+   
+   function rotate_map(cel_x,cel_y,sx,sy,cel_w,cel_h)
+    for v=0,cel_h*8-1 do
+     tline(sx+v,sy+cel_w*8-1,sx+v,sy,cel_x,cel_y+v/8)
+    end
+   end
+   
+   function draw_toilet(x,y,open)
+    palt(0,false)
+    palt(2,true)
+    rect(x,y,x+51,y+83,0)
+    rect(x+1,y+1,x+50,y+82,0)
+    if open then
+     map(0,17,x+2,y+2,6,10)
+     map(6,16,x+52,y-6,5,13)
+    else
+     rectfill(x+2,y+2,x+49,y+81,4)
+     spr(48,x+4,y+39)
+    end
+    palt()
+   end
+   
+   function time_format()
+    local seconds=ceil(timer_display/30)
+    local minutes=seconds\60
+    local padded=seconds%60
+    if padded<10 then
+     padded="0"..padded
+    end
+    return "timer:"..minutes..":"..padded
+   end
+   
+   menu_msg=[[instructions:
+   - to start type "play"
+   - to view achievements
+     type "awards"
+   
+   goal:
+   - don't shit your pants
+   
+   - type "delete" to delete
+     your file]]
+   
+   award_msgs={
+    "thinking (and shitting)\n  inside the box",
+    "mr. efficient",
+    "shitting 101",
+    "so close and yet so far...",
+    "sep-poo-ku",
+    "holding off the inevitable",
+    "the inevitable",
+    "shitting at the starting gun",
+    "slow typer",
+    "you are the shit king!"
+   }
+   
+   function _draw()
+    cls()
+    if screen=="menu" then
+     print("don't      your pants!",12,16,13)
+     print("shit",36,16,4)
+     if awards[10] then
+      spr(34,31,10)
+     end
+     print("a survival horror adventure",20,24,1)
+     print(menu_msg,14,40,7)
+     print(message,1,109,6)
+     print(">"..input,1,123,7)
+    elseif screen=="game" then
+     print(time_format(),1,1,7)
+     print("quit",107,1,7)
+     print(message,1,110,7)
+     print(">"..input,1,123,7)
+     if overflow2 then
+      rectfill(0,97,127,109,0)
+      print(overflow2,1,98,7)
+      print(overflow,1,104,7)
+      clip(0,8,128,88)
+     elseif overflow then
+      rectfill(0,103,127,109,0)
+      print(overflow,1,104,7)
+      clip(0,8,128,94)
+     else
+      clip(0,8,128,100)
+     end
+     map(0,0,0,4,16,14)
+     draw_toilet(68,13,door)
+     if standing then
+      draw_man(24,14,"neutral",true,pants)
+     else
+      draw_man(80,16,"neutral",false,pants)
+     end
+    elseif screen=="end" then
+     if ending=="sadman" then
+      map(2,1,8,-8,14,13)
+      draw_man(48,2,"sad",true,true)
+     elseif ending=="floorshit" then
+      map(2,1,8,-8,14,13)
+      draw_man(68,3,"happy",true,false)
+      palt(2,true)
+      spr(132,24,67,4,2)
+      palt()
+     elseif ending=="sadtoilet" then
+      map(2,1,8,-8,14,13)
+      clip(8,0,112,96)
+      draw_toilet(38,5,true)
+      draw_man(50,8,"sad",false,true)
+      clip()
+     elseif ending=="toiletshit" then
+      map(2,1,8,-8,14,13)
+      clip(8,0,112,96)
+      draw_toilet(38,5,true)
+      draw_man(50,8,"happy",false,false)
+      clip()
+     elseif ending=="pillsworked" then
+      clip(8,0,112,96)
+      map(2,1,8,0,14,13)
+      draw_man(50,20,"happy",true,true)
+      clip()
+     elseif ending=="pillsuhoh" then
+      clip(8,0,112,96)
+      map(2,1,8,0,14,13)
+      draw_man(50,20,"neutral",true,true,true)
+      rectfill(56,26,60,30,0)
+      rectfill(63,26,67,30,0)
+      clip()
+     elseif ending=="pillsshit" then
+      clip(8,0,112,96)
+      map(2,1,8,0,14,13)
+      draw_man(50,20,"sad",true,true,true)
+      clip()
+     elseif ending=="saddead" then
+      map(2,2,8,-8,14,13)
+      palt(2,true)
+      palt(0,false)
+      rotate_map(25,0,42,73,2,4)
+      rotate_map(27,0,42,49,2,4)
+      rotate_map(17,0,24,51,4,11)
+      if awards[10] then
+       spr(102,10,82,3,2,false,true)
+      end
+      palt()
+     elseif ending=="happydead" then
+      map(2,2,8,-8,14,13)
+      palt(2,true)
+      palt(0,false)
+      if awards[10] then
+       spr(102,9,71,3,2,false,true)
+      end
+      rotate_map(29,0,20,73,2,4)
+      rotate_map(31,0,20,49,2,4)
+      rotate_map(21,0,28,51,4,11)
+      spr(132,70,78,4,2)
+      palt()
+     end
+     print(message,1,98,7)
+     if redmessage then
+      print(redmessage,1,116,8)
+     end
+     print("press enter to continue...",28,123,6)
+     pset(123,127,6)
+    elseif screen=="awards" then
+     print("pants shitting achievements",10,2,9)
+     print("1:"..award_msgs[1],9,15,6)
+     if awards[1] then
+      spr(49,0,14)
+     end
+     for a=2,9 do
+      print(a..":"..award_msgs[a],9,13+a*10,6)
+      if awards[a] then
+       spr(49,0,12+a*10)
+      end
+     end
+     print("final:"..award_msgs[10],9,115,6)
+     if awards[10] then
+      spr(49,0,114)
+     end
+    elseif screen=="credits" then
+     palt(2,true)
+     print("original flash game by:",3,3,6)
+     spr(132,48,16,4,2)
+     print("decade studios",36,36,7)
+     print("(now cellar door games)",18,43,7)
+     print("www.cellardoorgames.com",18,50,7)
+     print("programming",9,64,7)
+     print("art & design",7,70,7)
+     print("kenny lee",13,80,7)
+     print("audio & design",66,70,7)
+     print("teddy lee",76,80,7)
+   
+     print("pico-8 remake",38,94,7)
+     print("princess choochoo",30,104,7)
+   
+     print("press enter to continue...",28,123,6)
+     pset(123,127,6)
+     palt()
+    end
+   end
+   
+   look_verbs={"look","check","examine"}
+   open_verbs={"open","push"}
+   break_verbs={"break","smash"}
+   pull_verbs={"pull","yank"}
+   close_verbs={"close","shut","slam"}
+   remove_verbs={"remove","drop","off"}
+   wear_verbs={"wear","on"}
+   move_verbs={"move","enter","go"}
+   poop_verbs={"poop","poo","crap","dump","shit","defecate"}
+   eat_verbs={"eat","take"}
+   die_verbs={"die","kill","suicide"}
+   lightly_adverbs={"lightly","light","gently","softly","soft","little","small","tiny"}
+   bathroom_nouns={"bathroom","washroom","restroom"}
+   pills_nouns={"pills","pill","drugs"}
+   
+   function game_init()
+    timer=1200
+    timer_display=1200
+    pants=true
+    door=false
+    standing=true
+    farts=0
+    pills=false
+    pill_timer=nil
+    message="you really need to take a shit..."
+    overflow=nil
+    overflow2=nil
+    redmessage=nil
+   end
+   
+   function process_input()
+    overflow=nil
+    overflow2=nil
+    if sub(input,1,1)==" " then
+     message="you started the sentence with a\nspace... try again."
+     return
+    end
+    if screen=="menu" then
+     if input=="play" or input=="start" then
+      screen="game"
+      game_init()
+      sfx(-1,0)
+     elseif input=="awards" then
+      screen="awards"
+      sfx(-1,0)
+     elseif input=="delete" then
+      awards={}
+      for i=1,10 do
+       dset(i,0)
+      end
+      screen="game"
+      game_init()
+      sfx(-1,0)
+     elseif input=="credits" then
+      screen="credits"
+      sfx(-1,0)
+     elseif input=="shit" or input=="shit pants" then
+      screen="end"
+      ending="sadman"
+      message="the game hasn't started yet but\nyou couldn't help yourself.\nyou just shit your pants.\ngame over."
+      awards[8]=true
+      sfx(9,0)
+     else
+      message=input.." is not a proper command"
+     end
+    elseif screen=="game" then
+     if sub(input,-1,-1)==" " then
+      message="your sentence ended with a\nspace... try again."
+      return
+     end
+     local words=splitstr(input)
+     if is_oneof(words[1],poop_verbs) then
+      if is_oneof("pants",words) then
+       screen="end"
+       ending="sadman"
+       message="\nyou just shit your pants!\ngame over!"
+       awards[3]=true
+       sfx(9,0)
+      elseif is_oneof("toilet",words) then
+       if not door then
+        message="what toilet?"
+       elseif pants then
+        screen="end"
+        ending="sadtoilet"
+        message="you forgot to take your pants\noff! you just shit your pants!\ngame over!"
+        awards[4]=true
+        sfx(9,0)
+       else
+        screen="end"
+        ending="toiletshit"
+        message="\nyou shit in the toilet!\ncongratulations!"
+        awards[1]=true
+        sfx(10,0)
+       end
+      elseif #words==1 then
+       if standing and pants then
+        screen="end"
+        ending="sadman"
+        message="\nyou just shit your pants!\ngame over!"
+        awards[3]=true
+        sfx(9,0)
+       elseif standing and not pants then
+        screen="end"
+        ending="floorshit"
+        message="\nyou just shit on the floor!\ncongratulations!"
+        awards[2]=true
+        sfx(10,0)
+       elseif not standing and pants then
+        screen="end"
+        ending="sadtoilet"
+        message="you forgot to take your pants\noff! you just shit your pants!\ngame over!"
+        awards[4]=true
+        sfx(9,0)
+       elseif not standing and not pants then
+        screen="end"
+        ending="toiletshit"
+        message="\nyou shit in the toilet!\ncongratulations!"
+        awards[1]=true
+        sfx(10,0)
+       end
+      end
+     elseif is_oneof(words[1],look_verbs) then
+      if #words==1 then
+       if door then
+        overflow2="you're in a room with a door that"
+        overflow="leads to a washroom. you're"
+        message="wearing a shirt and pants.\nyou have no hair."
+       else
+        overflow="you're in a room with a door."
+        message="you're wearing a shirt and pants.\nyou have no hair."
+       end
+      elseif words[2]=="door" then
+       message="it's a door."
+      elseif words[2]=="hair" then
+       message="you shed a single tear."
+      elseif words[2]=="feet" then
+       message="you have feet."
+      elseif words[2]=="shirt" then
+       overflow="upon closer inspection, you"
+       message="realize you're wearing your\nshirt backwards."
+      elseif words[2]=="pants" or words[2]=="pockets" then
+       if pills then
+        message="your pockets are empty."
+       else
+        overflow2="you check your pockets. you find"
+        overflow="some pills for stomach relief."
+        message="it says they take 45 seconds to\nstart working."
+       end
+      elseif words[2]=="toilet" then
+       if door then
+        overflow="don't just look at the toilet,"
+        message="the clock is ticking!\ndo something!"
+       else
+        message="what toilet?"
+       end
+      elseif is_oneof(words[2],bathroom_nouns) then
+       if door then
+        message="it looks like a washroom."
+       else
+        message="you can't see into the other\nroom. the door's closed."
+       end
+      end
+     elseif is_anyof(remove_verbs,words) and is_oneof("pants",words) then
+      if not standing then
+       message="get off the toilet first."
+      elseif pants then
+       pants=false
+       message="you remove your pants."
+      else
+       message="your pants are already off."
+      end
+     elseif is_anyof(wear_verbs,words) and is_oneof("pants",words) then
+      if not standing then
+       message="get off the toilet first."
+      elseif pants then
+       message="your pants are already on."
+      else
+       pants=true
+       message="you don't know why, but you put\nyour pants back on."
+      end
+     elseif is_oneof(words[1],open_verbs) and is_oneof("door",words) then
+      message="you try pushing the door open\nbut it won't budge."
+     elseif is_oneof(words[1],pull_verbs) and is_oneof("door",words) then
+      door=true
+      message="oh right..."
+     elseif is_oneof(words[1],break_verbs) and is_oneof("door",words) then
+      screen="end"
+      ending="sadman"
+      message="the exertion causes you to\nshit your pants!\ngame over!"
+      awards[3]=true
+      sfx(9,0)
+     elseif is_oneof(words[1],close_verbs) and is_oneof("door",words) then
+      if not standing then
+       message="you're sitting on the can.\nyou can't reach the door."
+      elseif door then
+       door=false
+       message="you close the door. but you\nstill need to take a shit."
+      else
+       message="the door is already closed."
+      end
+     elseif (
+      (is_oneof("sit",words) and is_oneof("toilet",words)) or
+      (is_oneof(words[1],move_verbs) and (is_oneof("toilet",words) or is_anyof(bathroom_nouns,words)))
+     ) then
+      if not standing then
+       message="you're already sitting on the\ntoilet"
+      elseif not door then
+       overflow="you quietly try to sit on the"
+       message="toilet with the door closed but\nyour efforts are in vain"
+      else
+       standing=false
+       message="you sit on the toilet"
+      end
+     elseif is_oneof("stand",words) then
+      if standing then
+       message="you stand up even more than\nbefore."
+      else
+       standing=true
+       message="you stand up."
+      end
+     elseif words[1]=="fart" then
+      if #words==1 then
+       if standing and pants then
+        screen="end"
+        ending="sadman"
+        message="\nyou farted too hard and shit\nyour pants! maybe next time you"
+        redmessage="shouldn't push it so hard"
+        awards[3]=true
+        sfx(9,0)
+       elseif standing and not pants then
+        screen="end"
+        ending="floorshit"
+        message="you farted too hard but your\npants are off so you shit on\nthe floor!  still, you\n"
+        redmessage="shouldn't push it so hard"
+        awards[2]=true
+        sfx(10,0)
+       elseif not standing and pants then
+        screen="end"
+        ending="sadtoilet"
+        message="you forgot to take your pants\noff! you just shit your pants!\ngame over!"
+        awards[4]=true
+        sfx(9,0)
+       elseif not standing and not pants then
+        screen="end"
+        ending="toiletshit"
+        message="\nyou shit in the toilet!\ncongratulations!"
+        awards[1]=true
+        sfx(10,0)
+       end
+      elseif is_oneof(words[2],lightly_adverbs) then
+       if farts==0 then
+        message="you farted lightly. relief!"
+        timer+=1860
+       elseif farts==1 then
+        message="you farted already. another one\nwill stain your pants."
+       else
+        screen="end"
+        ending="sadman"
+        message="\nyou just shit your pants!\ngame over!"
+        awards[3]=true
+        sfx(9,0)
+       end
+       farts+=1
+      end
+     elseif is_oneof(words[1],eat_verbs) and is_anyof(pills_nouns,words) then
+      if pills then
+       message="you already ate the pills."
+      else
+       pills=true
+       pill_timer=1350
+       message="you eat the pills. hopefully\nthey'll start working in time."
+      end
+     elseif is_oneof(words[1],die_verbs) then
+      if pants then
+       screen="end"
+       ending="saddead"
+       message="your vision fades and you hear\na soft 'pbffffff' as you shit\nyour pants. game over."
+       awards[5]=true
+       sfx(9,0)
+      else
+       screen="end"
+       ending="happydead"
+       message="your vision fades and you hear\na soft 'pbffffff' as you shit,\nbut your pants are off.\nso... congratulations?"
+       awards[5]=true
+       sfx(10,0)
+      end
+     elseif input=="quit" then
+      screen="menu"
+      message=""
+     else
+      message="i don't know how to\n"..input
+     end
+    end
+   end
+   
+   function is_oneof(elem,options)
+    for i,opt in ipairs(options) do
+     if elem==opt then
+      return i
+     end
+    end
+    return false
+   end
+   
+   function is_anyof(elems,options)
+    for elem in all(elems) do
+     if is_oneof(elem,options) then
+      return true
+     end
+    end
+    return false
+   end
+   
+   function splitstr(str, sep)
+    sep=sep or " "
+    local segs={}
+    local i=1
+    while i<=#str do
+     if sub(str,i,i-1+#sep)==sep then
+      add(segs,sub(str,0,i-1))
+      str=sub(str,i+#sep)
+      i=1
+     else
+      i+=1
+     end
+    end
+    add(segs,str)
+    return segs
+   end
+   

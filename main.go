@@ -27,6 +27,28 @@ const (
 	LogLevelError
 )
 
+// Verb lists
+var (
+	lookVerbs      = []string{"look", "check", "examine"}
+	openVerbs      = []string{"open", "push"}
+	breakVerbs     = []string{"break", "smash"}
+	pullVerbs      = []string{"pull", "yank"}
+	closeVerbs     = []string{"close", "shut", "slam"}
+	removeVerbs    = []string{"remove", "drop", "off"}
+	wearVerbs      = []string{"wear", "on"}
+	moveVerbs      = []string{"move", "enter", "go"}
+	poopVerbs      = []string{"poop", "poo", "crap", "dump", "shit", "defecate"}
+	eatVerbs       = []string{"eat", "take"}
+	dieVerbs       = []string{"die", "kill", "suicide"}
+	lightlyAdverbs = []string{"lightly", "light", "gently", "softly", "soft", "little", "small", "tiny"}
+)
+
+// Noun lists
+var (
+	bathroomNouns = []string{"bathroom", "washroom", "restroom"}
+	pillsNouns    = []string{"pills", "pill", "drugs"}
+)
+
 type User struct {
 	Alias        string
 	TimeLeft     time.Duration
@@ -161,7 +183,7 @@ func (g *Game) updateGameEnvironment() {
 
 		case stateGameOver:
 			CursorHide()
-			fmt.Println("Game Over! Time's up.")
+			fmt.Println("Game Over!")
 			DelayedAction(2*time.Second, func() {
 				fmt.Print("Done")
 			})
@@ -227,6 +249,13 @@ func DelayedAction(duration time.Duration, action func()) {
 }
 
 func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan chan error, doneChan chan bool) {
+	if input != "" {
+		inputLog(LogLevelInput, g.User.Alias, input)
+	}
+
+	// Append the words to the user's input buffer for awards tracking
+	g.UserInputBuffer = append(g.UserInputBuffer, input)
+
 	switch input {
 	case "play":
 		g.GameState.AppState = statePlaying
@@ -239,7 +268,6 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		DelayedAction(2*time.Second, func() {
 			CursorShow()
 		})
-
 	case "awards":
 		g.GameState.AppState = stateAwards
 		g.updateGameEnvironment()
@@ -254,7 +282,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 			for awardID, earned := range g.User.Awards {
 				if earned {
 					// Print the name of the award
-					awardName := getAwardNameByID(awardID) // Implement this function to get the award name by ID
+					awardName := getAwardNameByID(awardID)
 					fmt.Println("- " + awardName)
 				}
 			}
@@ -269,6 +297,21 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		MoveCursor(7, 23)
 		CursorShow()
 	default:
+		// Check if the input matches any verb from poopVerbs
+		for _, verb := range poopVerbs {
+			if input == verb {
+				g.mutex.Lock()
+				defer g.mutex.Unlock()
+				g.processShitCommand(inputChan)
+				// Similar to "shit," protect any shared resources with a mutex
+
+				g.GameState.AppState = stateMainMenu
+				g.updateGameEnvironment()
+				return
+			}
+		}
+
+		// If no matching verb is found, handle it as an invalid choice
 		CursorHide()
 		MoveCursor(7, 23)
 		fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
@@ -284,8 +327,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 	}
 }
 
-func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
-
+func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan chan byte) {
 	if input != "" {
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
@@ -294,11 +336,6 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 	g.UserInputBuffer = append(g.UserInputBuffer, input)
 
 	switch input {
-	case "shit":
-		// Lock the mutex before accessing/modifying shared resources
-		g.mutex.Lock()
-		defer g.mutex.Unlock()
-		g.processShitCommand()
 	case "quit":
 		// Similar to "shit," protect any shared resources with a mutex
 		g.mutex.Lock()
@@ -311,15 +348,39 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool) {
 		g.updateGameEnvironment()
 		return
 	default:
-		MoveCursor(2, 23)
-		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
-		MoveCursor(2, 23)
-		fmt.Fprintf(os.Stdout, BgBlue+CyanHi+"I don't know how to "+RedHi+"%s"+Reset, input)
-		MoveCursor(5, 24)
-		fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
-		g.GameState.cursX, g.GameState.cursY = 5, 24
+		// Check if the input matches any verb from poopVerbs
+		for _, verb := range poopVerbs {
+			if input == verb {
+				g.mutex.Lock()
+				defer g.mutex.Unlock()
+				g.processShitCommand(inputChan)
+				// Similar to "shit," protect any shared resources with a mutex
+				g.mutex.Lock()
+				defer g.mutex.Unlock()
+				// Send a signal to stop the timer
+				stopChan <- true
+				safeClose(stopChan) // Safely close the channel
+				g.cleanupGame()     // Perform any necessary cleanup
+				g.GameState.AppState = stateGameOver
+				g.updateGameEnvironment()
+				return
+			}
+		}
+
+		// If no matching verb is found, handle it as an invalid choice
+		CursorHide()
+		MoveCursor(7, 23)
+		fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
+
+		DelayedAction(1*time.Second, func() {
+			MoveCursor(7, 23)
+			fmt.Print(BgBlue + RedHi + "                " + Reset)
+			MoveCursor(7, 23)
+			g.GameState.cursX, g.GameState.cursY = 7, 23
+			g.updateGameEnvironment() // Use this to display the correct environment based on the current state
+			CursorShow()
+		})
 	}
-	g.checkAndGrantAwards()
 }
 
 func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
@@ -337,10 +398,44 @@ func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
 	g.updateGameEnvironment()
 }
 
-func (g *Game) processShitCommand() {
-	// Implement what happens when the user types "shit"
-	fmt.Println("Processing 'shit' command...")
-	// Example: Update GameState, trigger events, etc.
+func (g *Game) processShitCommand(inputChan chan byte) {
+	// Check and grant any awards
+	g.checkAndGrantAwards(inputChan)
+
+	// Check if the user has earned any awards
+	if len(g.User.Awards) > 0 {
+		// Display the specific award art here (replace 'awardArt' with actual art file)
+		//awardArt := "award.ans" // Example art file
+		//displayAnsiFile(ArtFileDir+awardArt, g.User.LocalDisplay)
+
+		// Pause for a keypress
+		// g.readSingleKeyPress(inputChan, stateAwards)
+
+		// Display user's awards with keypress pause
+		fmt.Println("Awards earned by", g.User.Alias+":")
+		for awardID, earned := range g.User.Awards {
+			if earned {
+				// Print the name of the award
+				awardName := getAwardNameByID(awardID)
+				fmt.Println(awardName)
+			}
+		}
+
+		// Pause for a keypress
+		g.readSingleKeyPress(inputChan, stateMainMenu)
+	} else {
+		// If no awards were earned, display the failure screen (replace 'failureArt' with actual art file)
+		//failureArt := "failure.ans" // Example failure art file
+		//displayAnsiFile(ArtFileDir+failureArt, g.User.LocalDisplay)
+
+		// Pause for a keypress
+		g.readSingleKeyPress(inputChan, stateMainMenu)
+	}
+
+	// Transition to the main menu
+	g.GameState.AppState = stateMainMenu
+	MoveCursor(7, 23)
+	CursorShow()
 }
 
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {
@@ -367,7 +462,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 				fmt.Print(Reset)
 
 				// fmt.Println("\nInput received:", input)
-				g.handleGameplayInput(input, stopChan) // Handle input with stopChan
+				g.handleGameplayInput(input, stopChan, inputChan) // Handle input with stopChan
 
 				// Check if the state has changed to MainMenu, if so, break the loop
 				if g.GameState.AppState == stateMainMenu {
@@ -464,7 +559,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 				if g.GameState.AppState == stateMainMenu {
 					g.handleMainMenuInput(input, inputChan, errorChan, doneChan)
 				} else if g.GameState.AppState == statePlaying {
-					g.handleGameplayInput(input, nil) // Pass nil if stopChan is not needed or not available
+					g.handleGameplayInput(input, nil, inputChan) // Pass nil if stopChan is not needed or not available
 				}
 			} else if char == '\b' || char == 127 {
 				if len(r) > 0 {
