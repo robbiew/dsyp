@@ -53,3 +53,13 @@ func (g *Game) checkAndGrantAwards() {
 		}
 	}
 }
+
+// Function to get the award name by ID
+func getAwardNameByID(awardID string) string {
+	for _, award := range awards {
+		if award.ID == awardID {
+			return award.Name
+		}
+	}
+	return "Unknown Award"
+}

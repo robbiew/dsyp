@@ -244,30 +244,30 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		g.GameState.AppState = stateAwards
 		g.updateGameEnvironment()
 
+		ClearScreen()
+		CursorHide()
+
 		// Check if the user has earned any awards
 		if len(g.User.Awards) > 0 {
 			// Display the user's awards
-
-			DelayedAction(2*time.Second, func() {
-				fmt.Print(BgBlue + RedHi + "                         " + Reset)
-				MoveCursor(7, 23)
-				CursorShow()
-				g.GameState.AppState = stateMainMenu
-				g.setupGameEnvironment()
-				// Wait for a single keypress
-				g.readSingleKeyPress(inputChan, stateMainMenu)
-			})
+			fmt.Println("Awards earned by", g.User.Alias+":")
+			for awardID, earned := range g.User.Awards {
+				if earned {
+					// Print the name of the award
+					awardName := getAwardNameByID(awardID) // Implement this function to get the award name by ID
+					fmt.Println("- " + awardName)
+				}
+			}
 		} else {
-			ClearScreen()
-			CursorHide()
 			// User has no awards
 			fmt.Println("No awards earned yet by", g.User.Alias)
-			// Wait for a single keypress
-			g.readSingleKeyPress(inputChan, stateMainMenu)
-			g.GameState.AppState = stateMainMenu
-			MoveCursor(7, 23)
-			CursorShow()
 		}
+
+		// Wait for a single keypress
+		g.readSingleKeyPress(inputChan, stateMainMenu)
+		g.GameState.AppState = stateMainMenu
+		MoveCursor(7, 23)
+		CursorShow()
 	default:
 		CursorHide()
 		MoveCursor(7, 23)
