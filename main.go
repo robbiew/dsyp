@@ -124,6 +124,7 @@ type GameState struct {
 	Pants         bool
 	Standing      bool
 	Farts         int
+	FartedLightly bool
 	Pills         bool
 	PillTimer     time.Duration
 	RemainingTime time.Duration
@@ -449,7 +450,12 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 			// Check if the second word is in lightlyAdverbs
 			adverb := strings.ToLower(inputWords[1])
 			if containsWordFromList(adverb, lightlyAdverbs) {
-				// Process the fart command and add "fart lightly" to the input buffer
+				// Process the fart command and add "fart lightly" to the input buffer only once
+				if !g.GameState.FartedLightly {
+					g.UserInputBuffer = append(g.UserInputBuffer, "fart lightly")
+					g.GameState.FartedLightly = true
+				}
+
 				CursorHide()
 				MoveCursor(4, 23)
 				fmt.Print(BgBlue + CyanHi + " 																	  " + Reset)
@@ -460,7 +466,6 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 				g.GameState.cursX, g.GameState.cursY = 5, 24
 				MoveCursor(g.GameState.cursX, g.GameState.cursY)
 				CursorShow()
-				g.UserInputBuffer = append(g.UserInputBuffer, "fart lightly")
 				g.GameState.RemainingTime += 60 * time.Second // Add 60 seconds to the timer
 				g.GameState.Farts++                           // Increment the number of farts
 
@@ -666,6 +671,11 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 					safeClose(stopChan) // Safely close the stop channel
 					return
 				}
+				// Debug: Print UserInputBuffer at position 0, 25
+				MoveCursor(1, 2)
+				fmt.Print(BgBlue + YellowHi)
+				fmt.Printf("Buffer: %v\n", g.UserInputBuffer)
+				fmt.Print(Reset)
 			} else if runeChar == '\b' || runeChar == 127 {
 				if len(r) > 0 {
 					r = r[:len(r)-1] // Remove the last character from the buffer
@@ -819,6 +829,7 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 		Pants:         true,
 		Standing:      true,
 		Farts:         0,
+		FartedLightly: false,
 		Pills:         false,
 		PillTimer:     0,
 		stopTime:      false,

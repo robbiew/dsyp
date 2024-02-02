@@ -50,7 +50,8 @@ func (g *Game) timer(stopChan chan bool, inputChan chan byte) {
 
 			// Timer update logic
 			MoveCursor(0, 0)
-			fmt.Print(Reset + EraseLine)
+			fmt.Print(Reset + "                            ")
+			MoveCursor(0, 0)
 			fmt.Printf(Reset+Green+" TIMER: %v"+Reset, g.GameState.RemainingTime)
 			fmt.Print(BgBlue + YellowHi)
 
