@@ -355,10 +355,10 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 
 		DelayedAction(1*time.Second, func() {
 			MoveCursor(7, 23)
-			fmt.Print(BgBlue + RedHi + "                " + Reset)
+			fmt.Print(BgBlue + RedHi + "                       " + Reset)
 			MoveCursor(7, 23)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
-			g.updateGameEnvironment() // Use this to display the correct environment based on the current state
+			g.updateGameEnvironment()
 			CursorShow()
 		})
 	}
@@ -404,17 +404,16 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 
 		// If no matching verb is found, handle it as an invalid choice
 		CursorHide()
-		MoveCursor(7, 23)
-		fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
+		MoveCursor(2, 23)
+		fmt.Print(BgBlue + RedHi + "                                                                             " + Reset)
+		MoveCursor(2, 23)
+		fmt.Print(BgBlue + RedHi + "I don't know how to " + Reset + BgBlue + CyanHi + input + Reset)
 
-		DelayedAction(1*time.Second, func() {
-			MoveCursor(7, 23)
-			fmt.Print(BgBlue + RedHi + "                " + Reset)
-			MoveCursor(7, 23)
-			g.GameState.cursX, g.GameState.cursY = 7, 23
-			g.updateGameEnvironment() // Use this to display the correct environment based on the current state
-			CursorShow()
-		})
+		MoveCursor(5, 24)
+		fmt.Print(BgBlue + RedHi + "                                                                          " + Reset)
+		MoveCursor(5, 24)
+		g.GameState.cursX, g.GameState.cursY = 5, 24
+		CursorShow()
 	}
 }
 
