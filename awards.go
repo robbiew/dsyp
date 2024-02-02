@@ -45,29 +45,18 @@ var awards = []Award{
 
 func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 	// Check if the user is in the main menu state
+	isMainMenu := g.GameState.AppState == stateMainMenu
 
-	// Create a map to store verb and noun lists
-	lists := map[string][]string{
-		"poopVerbs":      poopVerbs,
-		"lookVerbs":      lookVerbs,
-		"openVerbs":      openVerbs,
-		"breakVerbs":     breakVerbs,
-		"pullVerbs":      pullVerbs,
-		"closeVerbs":     closeVerbs,
-		"removeVerbs":    removeVerbs,
-		"wearVerbs":      wearVerbs,
-		"moveVerbs":      moveVerbs,
-		"eatVerbs":       eatVerbs,
-		"dieVerbs":       dieVerbs,
-		"lightlyAdverbs": lightlyAdverbs,
-		"bathroomNouns":  bathroomNouns,
-		"pillsNouns":     pillsNouns,
+	// Define a map to associate specific input words with their corresponding "main" words
+	var wordMappings = map[string]string{
+		"poop": "shit",
+		// Add more mappings as needed
 	}
 
 	// Iterate over awards
 	for _, award := range awards {
-		// Check if the award is eligible to be granted based on the MainMenu field
-		if (award.OnMainMenu && g.GameState.OnMainMenu) || (!award.OnMainMenu && !g.GameState.OnMainMenu) {
+		// Check if the user has not already earned the award and is eligible to earn it based on MainMenu field
+		if !g.User.Awards[award.ID] && ((award.OnMainMenu && isMainMenu) || (!award.OnMainMenu && !isMainMenu)) {
 			// Initialize a flag to track if all conditions are met
 			allConditionsMet := true
 
@@ -81,12 +70,27 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 
 				// Iterate over input buffer
 				for _, input := range g.UserInputBuffer {
-					// Check if any input word matches any condition word from any list
+					// Iterate over condition words
 					for _, conditionWord := range conditionWords {
 						conditionWord = strings.ToLower(conditionWord)
+
+						// Check if any input word matches any condition word from any list
 						if containsWordFromLists(input, conditionWord, lists) {
 							conditionMet = true
 							break
+						}
+					}
+
+					// Check if the input word matches a mapped "main" word
+					if mainWord, ok := wordMappings[input]; ok {
+						for _, conditionWord := range conditionWords {
+							conditionWord = strings.ToLower(conditionWord)
+
+							// Check if the mapped "main" word matches the condition word from any list
+							if containsWordFromLists(mainWord, conditionWord, lists) {
+								conditionMet = true
+								break
+							}
 						}
 					}
 
@@ -102,7 +106,7 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 				}
 			}
 
-			// If all conditions are met, grant the award
+			// If all conditions are met, grant the award and mark it as earned
 			if allConditionsMet {
 				g.User.Awards[award.ID] = true
 
@@ -119,24 +123,15 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 				// Exit the loop after granting an award
 				return
 			}
-		} else {
-			// no award to grant
-			ClearScreen()
-
-			// Clear the input buffer here
-			g.UserInputBuffer = []string{}
-			return
 		}
 	}
 }
 
-// Function to check if a word contains any of the possible verb or noun options
+// Function to check if a word exists in any of the specified lists
 func containsWordFromLists(word, conditionWord string, lists map[string][]string) bool {
-	conditionWord = strings.ToLower(conditionWord)
 	for _, list := range lists {
-		for _, option := range list {
-			option = strings.ToLower(option)
-			if strings.Contains(word, option) && strings.Contains(conditionWord, option) {
+		for _, item := range list {
+			if strings.Contains(word, item) && strings.Contains(conditionWord, item) {
 				return true
 			}
 		}

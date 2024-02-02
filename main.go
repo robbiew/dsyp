@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Game constants
 const (
 	ArtFileDir    = "art/"
 	stateMainMenu = iota
@@ -20,6 +21,7 @@ const (
 	stateQuit
 	stateGameOver
 	stateHelp
+	stateCredits
 	stateIntro
 	stateAwards
 	LogLevelInput = iota
@@ -43,6 +45,28 @@ var (
 	lightlyAdverbs = []string{"lightly", "light", "gently", "softly", "soft", "little", "small", "tiny"}
 )
 
+// Noun lists
+var (
+	bathroomNouns = []string{"bathroom", "washroom", "restroom"}
+	pillsNouns    = []string{"pills", "pill", "drugs"}
+)
+
+// Define lists of words
+var lists = map[string][]string{
+	"lookVerbs":      lookVerbs,
+	"openVerbs":      openVerbs,
+	"breakVerbs":     breakVerbs,
+	"pullVerbs":      pullVerbs,
+	"closeVerbs":     closeVerbs,
+	"removeVerbs":    removeVerbs,
+	"wearVerbs":      wearVerbs,
+	"moveVerbs":      moveVerbs,
+	"poopVerbs":      poopVerbs,
+	"eatVerbs":       eatVerbs,
+	"dieVerbs":       dieVerbs,
+	"lightlyAdverbs": lightlyAdverbs,
+}
+
 // Define a map to associate each list of words with its corresponding "Main Word"
 var mainWordMappings = map[string]string{
 	"lookVerbs":      "look",
@@ -61,12 +85,6 @@ var mainWordMappings = map[string]string{
 	"pillsNouns":     "pills",
 }
 
-// Noun lists
-var (
-	bathroomNouns = []string{"bathroom", "washroom", "restroom"}
-	pillsNouns    = []string{"pills", "pill", "drugs"}
-)
-
 type User struct {
 	Alias        string
 	TimeLeft     time.Duration
@@ -84,26 +102,25 @@ type Game struct {
 	User            User
 	GameState       GameState
 	Awards          map[string]bool
+	AwardedAwards   map[string]bool
 	mutex           sync.Mutex
 	UserInputBuffer []string
 }
 
 type GameState struct {
-	Turn            int
-	OpenDoor        bool
-	RemovePants     bool
-	EnterToilet     bool
-	SitDown         bool
-	TakePill        bool
-	FartLightly     bool
-	stopTime        bool
-	pressureMessage bool
-	cursX           int
-	cursY           int
-	AppState        int
-	DoneChan        chan bool
-	LastAppState    int
-	OnMainMenu      bool
+	Door         bool
+	Pants        bool
+	Standing     bool
+	Farts        int
+	Pills        bool
+	PillTimer    time.Duration
+	stopTime     bool
+	cursX        int
+	cursY        int
+	AppState     int
+	DoneChan     chan bool
+	LastAppState int
+	OnMainMenu   bool
 }
 
 func inputLog(level int, userAlias string, message string) {
@@ -418,51 +435,34 @@ func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
 
 func (g *Game) processShitCommand(inputChan chan byte) {
 	// Check and grant any awards
+	g.UserInputBuffer = append(g.UserInputBuffer, "shit")
 	g.checkAndGrantAwards(inputChan)
+	ClearScreen()
 
-	// Check if the user has earned any awards
-	if len(g.User.Awards) > 0 {
-		// Display the specific award art here (replace 'awardArt' with actual art file)
-		//awardArt := "award.ans" // Example art file
-		//displayAnsiFile(ArtFileDir+awardArt, g.User.LocalDisplay)
-
-		// Pause for a keypress
-		// g.readSingleKeyPress(inputChan, stateAwards)
-
-		// Display user's awards with keypress pause
-		fmt.Println("Awards earned by", g.User.Alias+":")
-		for awardID, earned := range g.User.Awards {
-			if earned {
-				// Print the name of the award
-				awardName := getAwardNameByID(awardID)
-				fmt.Println(awardName)
+	// Display user's awarded awards
+	awardsEarned := false
+	for _, award := range awards {
+		if g.User.Awards[award.ID] {
+			if !awardsEarned {
+				fmt.Println("Awards earned by", g.User.Alias+":")
+				awardsEarned = true
 			}
+			awardName := getAwardNameByID(award.ID)
+			fmt.Println(awardName)
 		}
-		// Pause for a keypress
-		g.readSingleKeyPress(inputChan, stateMainMenu)
-	} else {
-		// If no awards were earned, display the failure screen (replace 'failureArt' with actual art file)
-		//failureArt := "failure.ans" // Example failure art file
-		//displayAnsiFile(ArtFileDir+failureArt, g.User.LocalDisplay)
-		// Display user's awards with keypress pause
-
-		fmt.Println("You shit your pants. You lose.")
-		g.readSingleKeyPress(inputChan, stateAwards)
-
-		fmt.Println("Awards earned by", g.User.Alias+":")
-		for awardID, earned := range g.User.Awards {
-			if earned {
-				// Print the name of the award
-				awardName := getAwardNameByID(awardID)
-				fmt.Println(awardName)
-			} else {
-				fmt.Println("No awards!")
-			}
-		}
-		// Pause for a keypress
-		g.readSingleKeyPress(inputChan, stateMainMenu)
 	}
 
+	if !awardsEarned {
+		fmt.Println("You shit your pants!")
+	}
+
+	// Pause for a keypress
+	g.readSingleKeyPress(inputChan, stateMainMenu)
+
+	// Clear the input buffer here
+	g.UserInputBuffer = []string{}
+	g.GameState.AppState = stateAwards
+	g.updateGameEnvironment()
 }
 
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {
@@ -644,21 +644,19 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 
 	// Initialize GameState with default or initial values
 	gameState := GameState{
-		Turn:            1,
-		OpenDoor:        false,
-		RemovePants:     false,
-		EnterToilet:     false,
-		SitDown:         false,
-		TakePill:        false,
-		FartLightly:     false,
-		stopTime:        false,
-		pressureMessage: false,
-		cursX:           7,
-		cursY:           23,
-		AppState:        stateMainMenu,
-		DoneChan:        make(chan bool),
-		LastAppState:    stateMainMenu,
-		OnMainMenu:      true,
+		Door:         false,
+		Pants:        true,
+		Standing:     true,
+		Farts:        0,
+		Pills:        false,
+		PillTimer:    0,
+		stopTime:     false,
+		cursX:        7,
+		cursY:        23,
+		AppState:     stateMainMenu,
+		DoneChan:     make(chan bool),
+		LastAppState: stateMainMenu,
+		OnMainMenu:   true,
 	}
 
 	// Initialize a map for tracking awards
@@ -666,9 +664,10 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 
 	// Initialize the Game struct with the components
 	game := &Game{
-		User:      user,
-		GameState: gameState,
-		Awards:    awards,
+		User:          user,
+		GameState:     gameState,
+		Awards:        awards,
+		AwardedAwards: make(map[string]bool),
 	}
 
 	// Initialize User.Awards map
