@@ -9,35 +9,112 @@ type Award struct {
 	ID              string
 	Name            string
 	Description     string
-	Art             string
-	AwardConditions []string
-	OnMainMenu      bool
+	AwardConditions []string // conditions to earn the award
+	RunDownClock    bool     // award is earned by letting the clock run down
+	OnMainMenu      bool     // award is earned from the main menu
+	Required        []string // required awards to earn this one
+	Optional        []string // optional awards to earn this one
 }
 
 var awards = []Award{
 	{
-		ID:              "award1",
+		ID:              "1",
 		Name:            "Thinking (and shitting) inside the box",
 		Description:     "Congratulations, all that potty training finally paid off.",
-		Art:             "award3.ans",
-		AwardConditions: []string{"fart lightly", "pull door", "remove pants", "go to bathroom", "shit"},
+		AwardConditions: []string{"pull door", "remove pants", "sit toilet", "shit"},
+		RunDownClock:    false,
 		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        nil,
 	},
 	{
-		ID:              "award3",
+		ID:              "2",
+		Name:            "Mr. Efficient",
+		Description:     "It's not his fault that door was so hard to open.",
+		AwardConditions: []string{"remove pants", "shit"},
+		RunDownClock:    false,
+		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        nil,
+	},
+	{
+		ID:              "3",
 		Name:            "Shitting 101",
-		Description:     "Sometimes even zero effort is rewarded.",
-		Art:             "award3.ans",
+		Description:     "Sometimes even zero effort is rewarded.", // typed shit, or farted, from game input
 		AwardConditions: []string{"shit"},
+		RunDownClock:    false,
 		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        nil,
 	},
 	{
-		ID:              "award8",
+		ID:              "4",
+		Name:            "So close and yet so far...",
+		Description:     "Pants. They get you every time.",
+		AwardConditions: []string{"pull door", "sit toilet", "shit"},
+		RunDownClock:    false,
+		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        nil,
+	},
+	{
+		ID:              "5",
+		Name:            "Sep-poo-ku",
+		Description:     "Giving up is never the answer. Or is it?",
+		AwardConditions: []string{"suicide"},
+		RunDownClock:    false,
+		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        []string{"remove pants"},
+	},
+	{
+		ID:              "6",
+		Name:            "Holding off the inevitable",
+		Description:     "How convenient that you had those pills...",
+		AwardConditions: []string{"take pills", "fart gently"}, // let time run out
+		RunDownClock:    true,
+		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        nil,
+	},
+	{
+		ID:              "7",
+		Name:            "The inevitable...",
+		Description:     "...to not to poop for an extra five seconds", // granted immediately after award 6
+		AwardConditions: []string{"take pills", "fart gently"},
+		RunDownClock:    false,
+		OnMainMenu:      false,
+		Required:        []string{"6"},
+		Optional:        nil,
+	},
+	{
+		ID:              "8",
 		Name:            "Shitting at the starting gun",
 		Description:     "You shit before the game began!",
-		Art:             "award8.ans",
-		AwardConditions: []string{"shit"},
+		AwardConditions: []string{"shit"}, // typed "shit" from the main menu
+		RunDownClock:    false,
 		OnMainMenu:      true,
+		Required:        nil,
+		Optional:        nil,
+	},
+	{
+		ID:              "9",
+		Name:            "Slow typer",
+		Description:     "If only you had a little more time... and a higher IQ.",
+		AwardConditions: []string{""},
+		RunDownClock:    true,
+		OnMainMenu:      false,
+		Required:        nil,
+		Optional:        []string{"remove pants"},
+	},
+	{
+		ID:              "10",
+		Name:            "Final Award: You are the Shit King!",
+		Description:     "And you have a crown to prove it!",
+		AwardConditions: []string{"shit"}, // Earn the first 9 awards. Automatic
+		RunDownClock:    false,
+		OnMainMenu:      false,
+		Required:        []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"},
 	},
 
 	// Define more awards as needed
