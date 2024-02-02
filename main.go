@@ -40,9 +40,9 @@ var (
 	wearVerbs      = []string{"wear", "on"}
 	moveVerbs      = []string{"move", "enter", "go"}
 	poopVerbs      = []string{"poop", "poo", "crap", "dump", "shit", "defecate"}
-	eatVerbs       = []string{"eat", "take"}
+	eatVerbs       = []string{"eat", "take", "gobble", "chomp"}
 	dieVerbs       = []string{"die", "kill", "suicide"}
-	lightlyAdverbs = []string{"lightly", "light", "gently", "softly", "soft", "little", "small", "tiny"}
+	lightlyAdverbs = []string{"lightly", "light", "gently", "softly", "soft", "little", "small", "tiny", "quiet", "quietly"}
 )
 
 // Noun lists
