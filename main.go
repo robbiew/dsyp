@@ -49,10 +49,11 @@ var (
 var (
 	bathroomNouns = []string{"bathroom", "washroom", "restroom"}
 	pillsNouns    = []string{"pills", "pill", "drugs"}
+	pantsNouns    = []string{"pants", "trousers", "underwear"}
 )
 
-// Define lists of words
-var lists = map[string][]string{
+// Define lists of verbs
+var verbList = map[string][]string{
 	"lookVerbs":      lookVerbs,
 	"openVerbs":      openVerbs,
 	"breakVerbs":     breakVerbs,
@@ -67,8 +68,15 @@ var lists = map[string][]string{
 	"lightlyAdverbs": lightlyAdverbs,
 }
 
-// Define a map to associate each list of words with its corresponding "Main Word"
-var mainWordMappings = map[string]string{
+// Define lists of nouns
+var nounList = map[string][]string{
+	"bathroomNouns": bathroomNouns,
+	"pillsNouns":    pillsNouns,
+	"pantsNouns":    pantsNouns,
+}
+
+// Define maps to associate each list of words with its corresponding main word to be evaluated for awards
+var verbMappings = map[string]string{
 	"lookVerbs":      "look",
 	"openVerbs":      "open",
 	"breakVerbs":     "break",
@@ -81,8 +89,12 @@ var mainWordMappings = map[string]string{
 	"eatVerbs":       "eat",
 	"dieVerbs":       "die",
 	"lightlyAdverbs": "lightly",
-	"bathroomNouns":  "bathroom",
-	"pillsNouns":     "pills",
+}
+
+var nounMappings = map[string]string{
+	"bathroomNouns": "bathroom",
+	"pillsNouns":    "pills",
+	"pantsNouns":    "pants",
 }
 
 type User struct {
@@ -108,19 +120,20 @@ type Game struct {
 }
 
 type GameState struct {
-	Door         bool
-	Pants        bool
-	Standing     bool
-	Farts        int
-	Pills        bool
-	PillTimer    time.Duration
-	stopTime     bool
-	cursX        int
-	cursY        int
-	AppState     int
-	DoneChan     chan bool
-	LastAppState int
-	OnMainMenu   bool
+	Door          bool
+	Pants         bool
+	Standing      bool
+	Farts         int
+	Pills         bool
+	PillTimer     time.Duration
+	RemainingTime time.Duration
+	stopTime      bool
+	cursX         int
+	cursY         int
+	AppState      int
+	DoneChan      chan bool
+	LastAppState  int
+	OnMainMenu    bool
 }
 
 func inputLog(level int, userAlias string, message string) {
@@ -193,7 +206,7 @@ func (g *Game) setupGameEnvironment() {
 	// MoveCursor(6, 24)
 }
 
-func (g *Game) updateGameEnvironment() {
+func (g *Game) updateGameEnvironment(inputChan chan byte) {
 	// Only update the environment if the game state has changed
 	if g.GameState.AppState != g.GameState.LastAppState {
 		ClearScreen()
@@ -220,12 +233,34 @@ func (g *Game) updateGameEnvironment() {
 			fmt.Print(Reset)
 
 		case stateGameOver:
-			g.GameState.OnMainMenu = false
 			fmt.Print(Reset)
-			g.GameState.AppState = stateMainMenu
-			g.setupGameEnvironment()
-			g.GameState.cursX, g.GameState.cursY = 7, 23
-			MoveCursor(7, 23)
+			g.GameState.OnMainMenu = false
+			g.GameState.Farts = 0
+			// Clear the input buffer here
+			g.UserInputBuffer = []string{}
+
+			ClearScreen()
+
+			// Display user's awarded awards
+			awardsEarned := false
+			for _, award := range awards {
+				if g.User.Awards[award.ID] {
+					if !awardsEarned {
+						fmt.Println("Awards earned by", g.User.Alias+":")
+						awardsEarned = true
+					}
+					awardName := getAwardNameByID(award.ID)
+					fmt.Println(awardName)
+				}
+			}
+
+			if !awardsEarned {
+				fmt.Println("You shit your pants!")
+			}
+
+			// Pause for a keypress
+			g.readSingleKeyPress(inputChan, stateMainMenu)
+			g.updateGameEnvironment(inputChan)
 
 		case stateIntro:
 			g.GameState.OnMainMenu = false
@@ -303,13 +338,13 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 		g.GameState.AppState = stateQuit
 		CursorHide()
 		MoveCursor(7, 23)
-		fmt.Println(BgBlue + RedHi + "Exiting the game. Goodbye!" + Reset)
+		fmt.Println(BgBlue + RedHi + "Exiting the game..." + Reset)
 		DelayedAction(2*time.Second, func() {
 			CursorShow()
 		})
 	case "awards":
 		g.GameState.AppState = stateAwards
-		g.updateGameEnvironment()
+		g.updateGameEnvironment(inputChan)
 
 		ClearScreen()
 		CursorHide()
@@ -343,7 +378,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 				defer g.mutex.Unlock()
 				g.processShitCommand(inputChan)
 				g.GameState.AppState = stateMainMenu
-				g.updateGameEnvironment()
+				g.updateGameEnvironment(inputChan)
 				return
 			}
 		}
@@ -358,7 +393,7 @@ func (g *Game) handleMainMenuInput(input string, inputChan chan byte, errorChan 
 			fmt.Print(BgBlue + RedHi + "                       " + Reset)
 			MoveCursor(7, 23)
 			g.GameState.cursX, g.GameState.cursY = 7, 23
-			g.updateGameEnvironment()
+			g.updateGameEnvironment(inputChan)
 			CursorShow()
 		})
 	}
@@ -369,13 +404,15 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 		inputLog(LogLevelInput, g.User.Alias, input)
 	}
 
-	// Check if the input matches any of the "Main Words" from the mappings
-	if mainWord, ok := mainWordMappings[input]; ok {
+	// Check if the first word (verbs) matches any of the "Main Words" from the mappings
+	if mainWord, ok := verbMappings[input]; ok {
 		// If a match is found, add the "Main Word" to the user's input buffer
 		g.UserInputBuffer = append(g.UserInputBuffer, mainWord)
 	}
 
-	switch input {
+	inputWords := strings.Fields(input) // Split input into words
+
+	switch inputWords[0] { // Check the first word of the input
 	case "quit":
 		// Similar to "shit," protect any shared resources with a mutex
 		g.mutex.Lock()
@@ -385,8 +422,80 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 		safeClose(stopChan) // Safely close the channel
 		g.cleanupGame()     // Perform any necessary cleanup
 		g.GameState.AppState = stateGameOver
-		g.updateGameEnvironment()
+		g.updateGameEnvironment(inputChan)
 		return
+	case "fart":
+		if len(inputWords) == 1 {
+			// If only "fart" is entered as a single word, go to GameOver and return to MainMenu
+			g.mutex.Lock()
+			defer g.mutex.Unlock()
+			stopChan <- true
+			safeClose(stopChan)
+			g.processFartLoseCommand(inputChan)
+			g.GameState.AppState = stateMainMenu
+			g.updateGameEnvironment(inputChan)
+			return
+		} else if g.GameState.Farts >= 3 {
+			// User farted three or more times, trigger a failure
+			g.mutex.Lock()
+			defer g.mutex.Unlock()
+			stopChan <- true
+			safeClose(stopChan)
+			g.processFartLoseCommand(inputChan)
+			g.GameState.AppState = stateMainMenu
+			g.updateGameEnvironment(inputChan)
+			return
+		} else {
+			// Check if the second word is in lightlyAdverbs
+			adverb := strings.ToLower(inputWords[1])
+			if containsWordFromList(adverb, lightlyAdverbs) {
+				// Process the fart command and add "fart lightly" to the input buffer
+				CursorHide()
+				MoveCursor(4, 23)
+				fmt.Print(BgBlue + CyanHi + " 																	  " + Reset)
+				MoveCursor(2, 23)
+				fmt.Print(BgBlue + CyanHi + "You farted lightly. Relief!                                          " + Reset)
+				MoveCursor(4, 24)
+				fmt.Print(BgBlue + RedHi + "                                                                      " + Reset)
+				g.GameState.cursX, g.GameState.cursY = 5, 24
+				MoveCursor(g.GameState.cursX, g.GameState.cursY)
+				CursorShow()
+				g.UserInputBuffer = append(g.UserInputBuffer, "fart lightly")
+				g.GameState.RemainingTime += 60 * time.Second // Add 60 seconds to the timer
+				g.GameState.Farts++                           // Increment the number of farts
+
+				if g.GameState.Farts == 2 {
+					// Display a warning for the second fart
+					CursorHide()
+					MoveCursor(2, 23)
+					fmt.Print(BlueHi + RedHi + "                                                       " + Reset)
+					MoveCursor(2, 23)
+					fmt.Print(BgBlue + RedHi + "You farted already. A second one will stain your pants." + Reset)
+					CursorShow()
+					g.GameState.Farts++ // Increment the number of farts
+				}
+
+				g.GameState.AppState = statePlaying
+				g.updateGameEnvironment(inputChan)
+				return
+			} else {
+				// If the second word is not in the adverb list, handle it as an invalid choice
+				CursorHide()
+				MoveCursor(2, 23)
+				fmt.Print(BgBlue + RedHi + "                                                                           " + Reset)
+				MoveCursor(2, 23)
+				fmt.Print(BgBlue + RedHi + "Invalid choice!" + Reset)
+
+				MoveCursor(6, 24)
+				fmt.Print(BgBlue + RedHi + "                                                                        " + Reset)
+				g.GameState.cursX, g.GameState.cursY = 6, 24
+				MoveCursor(g.GameState.cursX, g.GameState.cursY)
+				CursorShow()
+				return
+			}
+
+		}
+
 	default:
 		// Check if the input matches any verb from poopVerbs
 		for _, verb := range poopVerbs {
@@ -397,7 +506,7 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 				safeClose(stopChan) // Safely close the channel
 				g.processShitCommand(inputChan)
 				g.GameState.AppState = stateMainMenu
-				g.updateGameEnvironment()
+				g.updateGameEnvironment(inputChan)
 				return
 			}
 		}
@@ -415,6 +524,16 @@ func (g *Game) handleGameplayInput(input string, stopChan chan bool, inputChan c
 		g.GameState.cursX, g.GameState.cursY = 5, 24
 		CursorShow()
 	}
+
+}
+
+func containsWordFromList(word string, list []string) bool {
+	for _, item := range list {
+		if word == item {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
@@ -429,7 +548,56 @@ func (g *Game) readSingleKeyPress(inputChan chan byte, nextState int) {
 	// Transition to the nextState immediately upon any keypress
 	CursorShow()
 	g.GameState.AppState = nextState
-	g.updateGameEnvironment()
+	g.updateGameEnvironment(inputChan)
+}
+
+func (g *Game) pause(inputChan chan byte) {
+	// Wait for a single keypress
+
+	CursorHide()
+	MoveCursor(0, 23)
+	CenterText("Press a Key to Continue", 80)
+
+	<-inputChan
+
+	// Transition to the nextState immediately upon any keypress
+	CursorShow()
+
+}
+
+func (g *Game) processFartLoseCommand(inputChan chan byte) {
+	CursorHide()
+	ClearScreen()
+	fmt.Println("You farted too hard and shit your pants!")
+	g.pause(inputChan)
+
+	// Display user's awarded awards
+	g.GameState.AppState = stateAwards
+	g.updateGameEnvironment(inputChan)
+
+	ClearScreen()
+
+	// Check if the user has earned any awards
+	if len(g.User.Awards) > 0 {
+		// Display the user's awards
+		fmt.Println("Awards earned by", g.User.Alias+":")
+		for awardID, earned := range g.User.Awards {
+			if earned {
+				// Print the name of the award
+				awardName := getAwardNameByID(awardID)
+				fmt.Println("- " + awardName)
+			}
+		}
+	} else {
+		// User has no awards
+		fmt.Println("No awards earned yet by", g.User.Alias)
+	}
+
+	// Wait for a single keypress
+	g.readSingleKeyPress(inputChan, stateMainMenu)
+	g.GameState.AppState = stateMainMenu
+	MoveCursor(7, 23)
+	CursorShow()
 }
 
 func (g *Game) processShitCommand(inputChan chan byte) {
@@ -461,19 +629,22 @@ func (g *Game) processShitCommand(inputChan chan byte) {
 	// Clear the input buffer here
 	g.UserInputBuffer = []string{}
 	g.GameState.AppState = stateAwards
-	g.updateGameEnvironment()
+	g.updateGameEnvironment(inputChan)
 }
 
 func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan chan bool) {
 	g.GameState.AppState = stateIntro
-	g.updateGameEnvironment()
+	g.updateGameEnvironment(inputChan)
 
 	g.GameState.AppState = statePlaying
-	g.updateGameEnvironment()
+	g.updateGameEnvironment(inputChan)
 
 	stopChan := make(chan bool)
 
-	go g.timer(stopChan)
+	g.GameState.RemainingTime = time.Second * 40 // Set the initial timer value
+	g.GameState.Farts = 0                        // Set Farts to inital value
+
+	go g.timer(stopChan, inputChan)
 
 	var r []rune
 	for {
@@ -524,6 +695,7 @@ func (g *Game) startGame(inputChan chan byte, errorChan chan error, doneChan cha
 			return
 		}
 		fmt.Print(Reset)
+
 	}
 }
 
@@ -608,7 +780,7 @@ func (g *Game) run(inputChan chan byte, errorChan chan error, doneChan chan bool
 		}
 
 		// Update the game environment based on the current state
-		g.updateGameEnvironment()
+		g.updateGameEnvironment(inputChan)
 	}
 
 	close(doneChan) // Signal all goroutines to stop
@@ -643,19 +815,20 @@ func initializeGame(localDisplay bool, dropPath string) *Game {
 
 	// Initialize GameState with default or initial values
 	gameState := GameState{
-		Door:         false,
-		Pants:        true,
-		Standing:     true,
-		Farts:        0,
-		Pills:        false,
-		PillTimer:    0,
-		stopTime:     false,
-		cursX:        7,
-		cursY:        23,
-		AppState:     stateMainMenu,
-		DoneChan:     make(chan bool),
-		LastAppState: stateMainMenu,
-		OnMainMenu:   true,
+		Door:          false,
+		Pants:         true,
+		Standing:      true,
+		Farts:         0,
+		Pills:         false,
+		PillTimer:     0,
+		stopTime:      false,
+		cursX:         7,
+		cursY:         23,
+		AppState:      stateMainMenu,
+		DoneChan:      make(chan bool),
+		LastAppState:  stateMainMenu,
+		OnMainMenu:    true,
+		RemainingTime: 40*time.Second + 1*time.Second, // Set the initial timer value
 	}
 
 	// Initialize a map for tracking awards

@@ -25,19 +25,23 @@ func NewTicker(d time.Duration) Ticker {
 	return &ticker{time.NewTicker(d), d}
 }
 
-func (g *Game) timer(stopChan chan bool) {
+func (g *Game) timer(stopChan chan bool, inputChan chan byte) {
 	ticker := NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for remaining := time.Second * 40; remaining >= 0; remaining -= ticker.Duration() {
+	for {
 		select {
 		case <-stopChan:
 			ticker.Stop()
 			return // Stop signal received, exit the timer
 		case <-g.GameState.DoneChan:
 			return // Game is done, exit the timer
-		default:
-			if remaining < time.Second*20 {
+		case <-time.After(ticker.Duration()):
+			if g.GameState.RemainingTime > 0 {
+				g.GameState.RemainingTime -= time.Second
+			}
+
+			if g.GameState.RemainingTime < time.Second*20 {
 				// Specific logic when the timer is under 20 seconds
 				MoveCursor(2, 23)
 				fmt.Print(EraseLine)
@@ -47,20 +51,19 @@ func (g *Game) timer(stopChan chan bool) {
 			// Timer update logic
 			MoveCursor(0, 0)
 			fmt.Print(Reset + EraseLine)
-			fmt.Printf(Reset+Green+" TIMER: %v"+Reset, remaining)
+			fmt.Printf(Reset+Green+" TIMER: %v"+Reset, g.GameState.RemainingTime)
 			fmt.Print(BgBlue + YellowHi)
 
 			// Restore the user's cursor position
 			MoveCursor(g.GameState.cursX, g.GameState.cursY)
 
-			if remaining == 0 {
+			if g.GameState.RemainingTime == 0 {
 				// Timer expired, call gameOver
 				close(g.GameState.DoneChan) // Signal all goroutines to stop
 				g.GameState.AppState = stateGameOver
-				g.updateGameEnvironment()
+
 				return
 			}
 		}
-		ticker.Tick()
 	}
 }

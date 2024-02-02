@@ -75,7 +75,7 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 						conditionWord = strings.ToLower(conditionWord)
 
 						// Check if any input word matches any condition word from any list
-						if containsWordFromLists(input, conditionWord, lists) {
+						if containsWordFromLists(input, conditionWord, verbList) {
 							conditionMet = true
 							break
 						}
@@ -87,7 +87,7 @@ func (g *Game) checkAndGrantAwards(inputChan chan byte) {
 							conditionWord = strings.ToLower(conditionWord)
 
 							// Check if the mapped "main" word matches the condition word from any list
-							if containsWordFromLists(mainWord, conditionWord, lists) {
+							if containsWordFromLists(mainWord, conditionWord, verbList) {
 								conditionMet = true
 								break
 							}
